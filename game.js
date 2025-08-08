@@ -22,6 +22,18 @@
   const randRange = (min, max) => Math.random() * (max - min) + min;
   const randInt = (min, max) => Math.floor(randRange(min, max + 1));
 
+  // Color blending utility (hex -> hex)
+  function blendHexColors(hexA, hexB, t) {
+    const pa = parseInt(hexA.slice(1), 16);
+    const pb = parseInt(hexB.slice(1), 16);
+    const r1 = (pa >> 16) & 255, g1 = (pa >> 8) & 255, b1 = pa & 255;
+    const r2 = (pb >> 16) & 255, g2 = (pb >> 8) & 255, b2 = pb & 255;
+    const r = Math.round(r1 + (r2 - r1) * t);
+    const g = Math.round(g1 + (g2 - g1) * t);
+    const b = Math.round(b1 + (b2 - b1) * t);
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  }
+
   // Pixel-art sprite generation (16x16) for a running character
   function createPixelManFrames() {
     const SIZE = 16;
@@ -211,6 +223,9 @@
     if (e.code === 'KeyR') {
       if (gameOver) restart();
     }
+    if (e.code === 'Digit1') { tryPurchase('speed'); }
+    if (e.code === 'Digit2') { tryPurchase('jump'); }
+    if (e.code === 'Digit3') { tryPurchase('double'); }
   }, { passive: false });
   window.addEventListener('keyup', (e) => {
     const k = keyMap[e.code];
@@ -236,12 +251,62 @@
     maxSpeed: 520,
   };
 
+  // Upgrade system
+  const UPGRADE_DEFS = {
+    speed: {
+      name: 'Speed Shoes',
+      baseCost: 10,
+      apply() {
+        stats.maxRunSpeed += 80;
+        stats.runAccel += 600;
+        chaserSpeedBonus += 40;
+        chaserMaxBonus += 40;
+        upgrades.speedLevel += 1;
+      },
+      canBuy() { return true; },
+      currentCost() { return this.baseCost + upgrades.speedLevel * 6; },
+      desc: '+Run speed'
+    },
+    jump: {
+      name: 'High Jump',
+      baseCost: 12,
+      apply() {
+        stats.jumpVelocity += 140;
+        chaserSpeedBonus += 40;
+        chaserMaxBonus += 40;
+        upgrades.jumpLevel += 1;
+      },
+      canBuy() { return true; },
+      currentCost() { return this.baseCost + upgrades.jumpLevel * 6; },
+      desc: '+Jump height'
+    },
+    double: {
+      name: 'Double Jump',
+      baseCost: 15,
+      apply() {
+        upgrades.doubleJump = true;
+        chaserSpeedBonus += 50;
+        chaserMaxBonus += 50;
+      },
+      canBuy() { return !upgrades.doubleJump; },
+      currentCost() { return this.baseCost; },
+      desc: 'Mid-air jump'
+    }
+  };
+
   // World state
   let player, platforms, cameraX, chaserX, chaserSpeed, score, bestScore, timeAlive, gameOver, deathReason;
   let spriteFrames = null;
   let facing = 1; // 1 = right, -1 = left
   let animTimer = 0;
   let runFrameIndex = 0;
+  let coins = 0;
+  let coinsCollectedThisRun = 0;
+  let coinsArray = [];
+  let upgrades = { speedLevel: 0, jumpLevel: 0, doubleJump: false };
+  let stats = { ...PLAYER };
+  let chaserSpeedBonus = 0;
+  let chaserMaxBonus = 0;
 
   function createPlayer(startX, startY) {
     return {
@@ -254,19 +319,43 @@
       onGround: false,
       coyoteTimer: 0,
       jumpBufferTimer: 0,
+      remainingAirJumps: 0,
     };
   }
 
   function createPlatform(x, y, w, h) {
-    return { x, y, width: w, height: h };
+    return { x, y, width: w, height: h, steppedAt: -1 };
   }
 
   function aabbIntersect(ax, ay, aw, ah, bx, by, bw, bh) {
     return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
   }
 
+  function tryPurchase(key) {
+    const def = UPGRADE_DEFS[key];
+    if (!def) return;
+    if (!def.canBuy()) return;
+    const cost = def.currentCost();
+    if (coins >= cost) {
+      coins -= cost;
+      def.apply();
+      // Update player air jumps if double purchased
+      if (key === 'double') {
+        player.remainingAirJumps = 1;
+      }
+    }
+  }
+
   function resetWorld() {
     if (!spriteFrames) spriteFrames = createPixelManFrames();
+    // Reset run-specific state
+    coins = 0;
+    coinsCollectedThisRun = 0;
+    coinsArray = [];
+    upgrades = { speedLevel: 0, jumpLevel: 0, doubleJump: false };
+    stats = { ...PLAYER };
+    chaserSpeedBonus = 0;
+    chaserMaxBonus = 0;
     platforms = [];
     const groundY = Math.min(window.innerHeight - 140, 560);
     // Start with a generous runway
@@ -325,12 +414,25 @@
           stepY -= randRange(-20, 60);
         }
       }
+
+      // Coins on this platform (clusters)
+      if (Math.random() < 0.5) {
+        const clusterCount = randInt(3, 6);
+        const startOffset = randRange(30, Math.max(40, width - 140));
+        const spacing = randRange(26, 34);
+        const coinY = y - randRange(40, 80);
+        for (let i = 0; i < clusterCount; i++) {
+          const cx = x + startOffset + i * spacing;
+          coinsArray.push({ x: cx, y: coinY, size: 16, collected: false, spin: Math.random() * Math.PI * 2 });
+        }
+      }
     }
   }
 
   function removeBehindPlatforms(minWorldX) {
     if (platforms.length < 64) return; // cheap guard
     platforms = platforms.filter(p => p.x + p.width > minWorldX);
+    coinsArray = coinsArray.filter(c => c.x + 32 > minWorldX && !c.collected);
   }
 
   function update(dt) {
@@ -339,7 +441,10 @@
     timeAlive += dt;
 
     // Difficulty ramp: slowly increase chaser speed
-    const targetSpeed = Math.min(CHASER.baseSpeed + timeAlive * (CHASER.accel * 0.1), CHASER.maxSpeed);
+    const targetSpeed = Math.min(
+      CHASER.baseSpeed + chaserSpeedBonus + timeAlive * (CHASER.accel * 0.1),
+      CHASER.maxSpeed + chaserMaxBonus
+    );
     chaserSpeed += (targetSpeed - chaserSpeed) * Math.min(1, dt * 0.5);
     chaserX += chaserSpeed * dt;
 
@@ -348,13 +453,13 @@
 
     // Horizontal acceleration/deceleration
     if (desired !== 0) {
-      player.vx += desired * PLAYER.runAccel * dt;
+      player.vx += desired * stats.runAccel * dt;
     } else {
       // decelerate towards zero
-      const decel = PLAYER.runDecel * dt;
+      const decel = stats.runDecel * dt;
       if (Math.abs(player.vx) <= decel) player.vx = 0; else player.vx -= Math.sign(player.vx) * decel;
     }
-    player.vx = clamp(player.vx, -PLAYER.maxRunSpeed, PLAYER.maxRunSpeed);
+    player.vx = clamp(player.vx, -stats.maxRunSpeed, stats.maxRunSpeed);
 
     // Jump buffering and coyote time
     if (input.jumpPressed) {
@@ -371,9 +476,15 @@
 
     // Attempt jump
     if (player.jumpBufferTimer > 0 && player.coyoteTimer > 0) {
-      player.vy = -PLAYER.jumpVelocity;
+      player.vy = -stats.jumpVelocity;
       player.onGround = false;
       player.coyoteTimer = 0;
+      player.jumpBufferTimer = 0;
+      player.remainingAirJumps = upgrades.doubleJump ? 1 : 0;
+    } else if (player.jumpBufferTimer > 0 && !player.onGround && upgrades.doubleJump && player.remainingAirJumps > 0) {
+      // Double jump
+      player.vy = -stats.jumpVelocity * 0.95;
+      player.remainingAirJumps -= 1;
       player.jumpBufferTimer = 0;
     }
 
@@ -397,12 +508,14 @@
     // Vertical
     player.y += player.vy * dt;
     let onGroundNow = false;
+    let groundPlatform = null;
     for (const p of platforms) {
       if (aabbIntersect(player.x, player.y, player.width, player.height, p.x, p.y, p.width, p.height)) {
         if (player.vy > 0) {
           player.y = p.y - player.height;
           player.vy = 0;
           onGroundNow = true;
+          groundPlatform = p;
         } else if (player.vy < 0) {
           player.y = p.y + p.height;
           player.vy = 0;
@@ -410,6 +523,12 @@
       }
     }
     player.onGround = onGroundNow;
+    if (onGroundNow) {
+      player.remainingAirJumps = upgrades.doubleJump ? 1 : 0;
+    }
+    if (groundPlatform && groundPlatform.steppedAt < 0) {
+      groundPlatform.steppedAt = timeAlive;
+    }
 
     // Camera follows ahead of player a bit
     const desiredCamX = player.x - 260 + clamp(player.vx, 0, 220) * 0.25;
@@ -417,6 +536,19 @@
 
     // Score is max distance ahead of start relative to chaser
     score = Math.max(score, Math.floor(player.x - chaserX));
+
+    // Coin collection
+    const playerBox = { x: player.x, y: player.y, w: player.width, h: player.height };
+    for (const c of coinsArray) {
+      if (c.collected) continue;
+      const cx = c.x - c.size / 2;
+      const cy = c.y - c.size / 2;
+      if (aabbIntersect(playerBox.x, playerBox.y, playerBox.w, playerBox.h, cx, cy, c.size, c.size)) {
+        c.collected = true;
+        coins += 1;
+        coinsCollectedThisRun += 1;
+      }
+    }
 
     // Generate new platforms ahead and prune behind
     ensureAheadPlatforms(cameraX + window.innerWidth * 2.5);
@@ -475,11 +607,56 @@
       const sx = Math.floor(p.x - cameraX);
       const sy = Math.floor(p.y);
       if (sx > window.innerWidth || sx + p.width < -200) continue;
-      ctx.fillStyle = '#25334a';
+      const baseFill = '#25334a';
+      let fillColor = baseFill;
+      if (p.steppedAt >= 0) {
+        const t = clamp((timeAlive - p.steppedAt) / 0.8, 0, 1);
+        fillColor = blendHexColors(baseFill, '#ffffff', t);
+      }
+      ctx.fillStyle = fillColor;
       ctx.fillRect(sx, sy, p.width, p.height);
-      ctx.strokeStyle = '#3f567a';
+      // Glow outline if stepped
+      if (p.steppedAt >= 0) {
+        ctx.save();
+        ctx.shadowColor = '#ffffff';
+        ctx.shadowBlur = 12;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(sx + 0.5, sy + 0.5, p.width - 1, p.height - 1);
+        ctx.restore();
+      } else {
+        ctx.strokeStyle = '#3f567a';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(sx + 0.5, sy + 0.5, p.width - 1, p.height - 1);
+      }
+    }
+
+    // Draw coins
+    for (const c of coinsArray) {
+      if (c.collected) continue;
+      const sx = Math.floor(c.x - cameraX);
+      const sy = Math.floor(c.y);
+      if (sx < -40 || sx > window.innerWidth + 40) continue;
+      const t = (timeAlive + c.spin) * 6;
+      const w = c.size * (0.6 + 0.4 * Math.abs(Math.cos(t)));
+      const h = c.size;
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.imageSmoothingEnabled = false;
+      ctx.fillStyle = '#ffd84a';
+      ctx.strokeStyle = '#b38a00';
       ctx.lineWidth = 2;
-      ctx.strokeRect(sx + 0.5, sy + 0.5, p.width - 1, p.height - 1);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Shine
+      ctx.globalAlpha = 0.7;
+      ctx.fillStyle = '#fff7b0';
+      ctx.beginPath();
+      ctx.ellipse(-w * 0.15, -h * 0.15, w * 0.15, h * 0.15, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
 
     // Draw chaser border as a translucent red wall
@@ -513,7 +690,7 @@
 
     ctx.save();
     ctx.translate(px + player.width / 2, py + player.height / 2);
-    const tilt = clamp(player.vx / PLAYER.maxRunSpeed, -1, 1) * 0.15;
+    const tilt = clamp(player.vx / stats.maxRunSpeed, -1, 1) * 0.15;
     ctx.rotate(tilt);
     if (facing < 0) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
@@ -535,9 +712,10 @@
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(`Speed: ${Math.round(chaserSpeed)}  Score: ${score}`, 16, 12);
+    ctx.fillText(`Coins: ${coins}`, 16, 34);
     if (bestScore != null) {
       ctx.fillStyle = '#a9b8d6';
-      ctx.fillText(`Best: ${bestScore}`, 16, 34);
+      ctx.fillText(`Best: ${bestScore}`, 16, 54);
     }
 
     // Controls hint
@@ -545,6 +723,31 @@
       ctx.fillStyle = '#a9b8d6';
       ctx.textAlign = 'center';
       ctx.fillText('Move: A/D or Arrow Keys — Jump: W/Up/Space — Keep ahead of the red wall!', window.innerWidth / 2, 14);
+    }
+
+    // Upgrade HUD (top-right)
+    if (!gameOver) {
+      const pad = 12;
+      const x0 = window.innerWidth - 360;
+      const y0 = 10;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#cfe3ff';
+      ctx.fillText('Upgrades (1/2/3):', x0, y0);
+      const items = [
+        { key: 'speed', label: '1) Speed Shoes', def: UPGRADE_DEFS.speed },
+        { key: 'jump', label: '2) High Jump', def: UPGRADE_DEFS.jump },
+        { key: 'double', label: '3) Double Jump', def: UPGRADE_DEFS.double },
+      ];
+      let yy = y0 + 18;
+      for (const it of items) {
+        const cost = it.def.currentCost();
+        const affordable = coins >= cost && it.def.canBuy();
+        ctx.fillStyle = affordable ? '#e8eef9' : '#7f8aa3';
+        const extra = it.key === 'speed' ? `Lv.${upgrades.speedLevel}` : it.key === 'jump' ? `Lv.${upgrades.jumpLevel}` : (upgrades.doubleJump ? 'Owned' : '');
+        ctx.fillText(`${it.label} — ${it.def.desc} — Cost: ${cost} ${extra ? '— ' + extra : ''}`, x0, yy);
+        yy += 18;
+      }
     }
 
     if (gameOver) {
@@ -580,7 +783,7 @@
     const moving = Math.abs(player.vx) > 10;
     if (moving) facing = Math.sign(player.vx) || facing;
     if (player.onGround && moving) {
-      const speedFactor = clamp(Math.abs(player.vx) / PLAYER.maxRunSpeed, 0.5, 1.6);
+      const speedFactor = clamp(Math.abs(player.vx) / stats.maxRunSpeed, 0.5, 1.6);
       animTimer += dt * 10 * speedFactor;
       runFrameIndex = Math.floor(animTimer) % (spriteFrames ? spriteFrames.run.length : 1);
     } else if (player.onGround && !moving) {
