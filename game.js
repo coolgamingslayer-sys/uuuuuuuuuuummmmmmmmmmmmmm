@@ -467,6 +467,14 @@
   }
   function startGameWithSettings() {
     applyDifficulty();
+    // In low graphics mode, drastically reduce generation complexity
+    if (settings.graphics === 'low') {
+      gen.movingRate = 0;
+      gen.hazardRate = 0;
+      gen.boosterRate = 0;
+      gen.slowRate = 0;
+      gen.coinRate = Math.min(gen.coinRate, 0.35);
+    }
     currentLevelIndex = 0;
     currentLevelTarget = levels[0].distance;
     resetWorld();
