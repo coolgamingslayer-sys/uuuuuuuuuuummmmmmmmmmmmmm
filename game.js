@@ -414,6 +414,61 @@
   let lastUpgradeLayout = [];
   let distanceTraveled = 0;
   let lastSafeSnapshot = null; // { x, y, chaserX }
+  // Menu & modes
+  let gamePhase = 'menu'; // 'menu' | 'playing' | 'levelComplete'
+  let gameMode = 'endless'; // 'endless' | 'levels'
+  const settings = {
+    difficulty: 'normal', // 'easy' | 'normal' | 'hard'
+    toggles: {
+      movingPlatforms: true,
+      crumblingPlatforms: true,
+      boosterRings: true,
+      hazards: true,
+      slowMoShards: true,
+      coins: true,
+    },
+  };
+  let menuButtons = [];
+  let levelButtons = [];
+  const levels = [
+    { name: 'Level 1', distance: 800 },
+    { name: 'Level 2', distance: 1400 },
+    { name: 'Level 3', distance: 2200 },
+    { name: 'Level 4', distance: 3200 },
+    { name: 'Level 5', distance: 4500 },
+  ];
+  let currentLevelIndex = 0;
+  let currentLevelTarget = levels[0].distance;
+  // Difficulty modifiers and generation rates
+  let diffSpeedMul = 1, diffAccelMul = 1, diffMaxMul = 1, gapMul = 1;
+  const gen = {
+    coinRate: 0.5,
+    movingRate: 0.18,
+    boosterRate: 0.22,
+    hazardRate: 0.25,
+    slowRate: 0.14,
+    crumbleChanceOnStep: 0.4,
+  };
+  function applyDifficulty() {
+    const d = settings.difficulty;
+    if (d === 'easy') {
+      diffSpeedMul = 0.85; diffAccelMul = 0.9; diffMaxMul = 0.95; gapMul = 0.9;
+      gen.coinRate = 0.6; gen.movingRate = 0.14; gen.boosterRate = 0.28; gen.hazardRate = 0.16; gen.slowRate = 0.18; gen.crumbleChanceOnStep = 0.28;
+    } else if (d === 'hard') {
+      diffSpeedMul = 1.15; diffAccelMul = 1.2; diffMaxMul = 1.15; gapMul = 1.1;
+      gen.coinRate = 0.45; gen.movingRate = 0.25; gen.boosterRate = 0.18; gen.hazardRate = 0.35; gen.slowRate = 0.12; gen.crumbleChanceOnStep = 0.55;
+    } else {
+      diffSpeedMul = 1; diffAccelMul = 1; diffMaxMul = 1; gapMul = 1;
+      gen.coinRate = 0.5; gen.movingRate = 0.18; gen.boosterRate = 0.22; gen.hazardRate = 0.25; gen.slowRate = 0.14; gen.crumbleChanceOnStep = 0.4;
+    }
+  }
+  function startGameWithSettings() {
+    applyDifficulty();
+    currentLevelIndex = 0;
+    currentLevelTarget = levels[0].distance;
+    resetWorld();
+    gamePhase = 'playing';
+  }
 
   function createPlayer(startX, startY) {
     return {
@@ -513,7 +568,7 @@
     const maxY = Math.max(minY + 120, window.innerHeight - 120);
 
     while (lastPlatformEndX < targetWorldX) {
-      const gap = randRange(80, 220);
+      const gap = randRange(80 * gapMul, 220 * gapMul);
       const width = randRange(180, 420);
       let nextY = lastPlatformY + randRange(-140, 140);
       nextY = clamp(nextY, minY, maxY);
@@ -528,7 +583,7 @@
 
       // Randomly let some platforms move (gentle sine oscillation)
       const p = platforms[platforms.length - 1];
-      if (Math.random() < 0.18) {
+      if (settings.toggles.movingPlatforms && Math.random() < gen.movingRate) {
         const axis = Math.random() < 0.6 ? 'y' : 'x';
         const amp = axis === 'y' ? randRange(18, 48) : randRange(20, 60);
         const period = randRange(2.4, 4.8);
@@ -551,7 +606,7 @@
       }
 
       // Coins on this platform (clusters)
-      if (Math.random() < 0.5) {
+      if (settings.toggles.coins && Math.random() < gen.coinRate) {
         const clusterCount = randInt(3, 6);
         const startOffset = randRange(30, Math.max(40, width - 140));
         const spacing = randRange(26, 34);
@@ -563,14 +618,14 @@
       }
 
       // Booster ring sometimes near end of platform
-      if (Math.random() < 0.22) {
+      if (settings.toggles.boosterRings && Math.random() < gen.boosterRate) {
         const rx = x + randRange(60, Math.max(80, width - 60));
         const ry = y - randRange(40, 100);
         boostRings.push({ x: rx, y: ry, r: 26, hit: false });
       }
 
       // Hazards: spikes or saws on top
-      if (Math.random() < 0.25 && width > 120) {
+      if (settings.toggles.hazards && Math.random() < gen.hazardRate && width > 120) {
         if (Math.random() < 0.6) {
           const num = randInt(2, 5);
           const start = x + randRange(10, width - 60);
@@ -584,7 +639,7 @@
       }
 
       // Slow-mo shard occasionally above platform
-      if (Math.random() < 0.14) {
+      if (settings.toggles.slowMoShards && Math.random() < gen.slowRate) {
         const sx = x + randRange(30, width - 30);
         const sy = y - randRange(80, 140);
         slowShards.push({ x: sx, y: sy, r: 12, taken: false, spin: Math.random() * Math.PI * 2 });
@@ -604,15 +659,15 @@
 
   function update(dt) {
     if (gameOver) return;
-    if (isUpgradeMenuOpen) return; // pause everything except menu
+    if (isUpgradeMenuOpen || gamePhase !== 'playing') return; // pause when menu/levels screen open
 
     const sdt = dt * globalTimeScale;
     timeAlive += sdt;
 
     // Difficulty ramp: slowly increase chaser speed
     const targetSpeed = Math.min(
-      CHASER.baseSpeed + chaserSpeedBonus + timeAlive * (CHASER.accel * 0.1),
-      CHASER.maxSpeed + chaserMaxBonus
+      CHASER.baseSpeed * diffSpeedMul + chaserSpeedBonus + timeAlive * (CHASER.accel * 0.1 * diffAccelMul),
+      CHASER.maxSpeed * diffMaxMul + chaserMaxBonus
     );
     chaserSpeed += (targetSpeed - chaserSpeed) * Math.min(1, sdt * 0.5);
     const chaserFactor = slowMoTimer > 0 ? 0.85 : 1.0;
@@ -731,7 +786,7 @@
       // Record last safe snapshot
       lastSafeSnapshot = { x: player.x, y: player.y, chaserX: chaserX };
       // Start crumble timer on first step for some platforms
-      if (Math.random() < 0.4 && groundPlatform.crumbleAt < 0) {
+      if (settings.toggles.crumblingPlatforms && Math.random() < gen.crumbleChanceOnStep && groundPlatform.crumbleAt < 0) {
         groundPlatform.crumbleAt = timeAlive + randRange(0.4, 1.0);
       }
     }
@@ -868,6 +923,11 @@
         gameOver = true;
         deathReason = 'You fell...';
       }
+    }
+
+    // Levels mode: check completion
+    if (!gameOver && gameMode === 'levels' && distanceTraveled >= currentLevelTarget) {
+      gamePhase = 'levelComplete';
     }
   }
 
@@ -1266,6 +1326,16 @@
       ctx.restore();
     }
 
+    // Start menu
+    if (gamePhase === 'menu') {
+      drawStartMenu();
+    }
+
+    // Level complete overlay
+    if (gamePhase === 'levelComplete') {
+      drawLevelComplete();
+    }
+
     if (gameOver) {
       ctx.save();
       ctx.fillStyle = 'rgba(10,12,20,0.7)';
@@ -1280,8 +1350,173 @@
       ctx.fillText(deathReason, window.innerWidth / 2, window.innerHeight / 2 - 26);
       ctx.fillStyle = '#a9b8d6';
       ctx.fillText('Press R to Restart', window.innerWidth / 2, window.innerHeight / 2 + 14);
+      // Main menu button
+      const bw = 180, bh = 42;
+      const bx = window.innerWidth / 2 - bw / 2;
+      const by = window.innerHeight / 2 + 60;
+      ctx.fillStyle = '#1a2333';
+      ctx.strokeStyle = '#3e61a3';
+      ctx.lineWidth = 2;
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+      ctx.fillStyle = '#e8eef9';
+      ctx.fillText('Main Menu', window.innerWidth / 2, by + 26);
+      levelButtons = [{ key: 'menu', x: bx, y: by, w: bw, h: bh }];
       ctx.restore();
     }
+    requestAnimationFrame(frame);
+  }
+
+  function drawStartMenu() {
+    const ctx = window.__ctx || (window.__ctx = canvas.getContext('2d'));
+    ctx.save();
+    ctx.fillStyle = 'rgba(8,10,16,0.7)';
+    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    const panelW = Math.min(760, window.innerWidth - 40);
+    const panelH = Math.min(540, window.innerHeight - 40);
+    const panelX = (window.innerWidth - panelW) / 2;
+    const panelY = (window.innerHeight - panelH) / 2;
+    ctx.fillStyle = '#101726';
+    ctx.strokeStyle = '#36507a';
+    ctx.lineWidth = 2;
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.strokeRect(panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1);
+    ctx.fillStyle = '#e8eef9';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = '700 24px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial';
+    ctx.fillText('Endless Chase Platformer', panelX + 18, panelY + 14);
+    ctx.font = '600 15px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial';
+    ctx.fillStyle = '#cfe3ff';
+    ctx.fillText('Choose Mode', panelX + 18, panelY + 56);
+    // Mode buttons
+    const mbW = 140, mbH = 36, mbY = panelY + 80;
+    let x1 = panelX + 18;
+    const modeEntries = [
+      { key: 'endless', label: 'Endless' },
+      { key: 'levels', label: 'Levels' },
+    ];
+    menuButtons = [];
+    for (const m of modeEntries) {
+      const selected = gameMode === m.key;
+      ctx.fillStyle = selected ? '#1e2a40' : '#151b28';
+      ctx.strokeStyle = selected ? '#3e61a3' : '#2a3a56';
+      ctx.lineWidth = 2;
+      ctx.fillRect(x1, mbY, mbW, mbH);
+      ctx.strokeRect(x1 + 0.5, mbY + 0.5, mbW - 1, mbH - 1);
+      ctx.fillStyle = '#e8eef9';
+      ctx.textAlign = 'center';
+      ctx.fillText(m.label, x1 + mbW / 2, mbY + 10);
+      menuButtons.push({ type: 'mode', key: m.key, x: x1, y: mbY, w: mbW, h: mbH });
+      x1 += mbW + 10;
+    }
+    // Difficulty
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#cfe3ff';
+    ctx.fillText('Difficulty', panelX + 18, panelY + 128);
+    const diffs = [ {k:'easy',l:'Easy'}, {k:'normal',l:'Normal'}, {k:'hard',l:'Hard'} ];
+    let dx = panelX + 18; const dy = panelY + 150;
+    for (const d of diffs) {
+      const sel = settings.difficulty === d.k;
+      const w = 110, h = 32;
+      ctx.fillStyle = sel ? '#1e2a40' : '#151b28';
+      ctx.strokeStyle = sel ? '#3e61a3' : '#2a3a56';
+      ctx.fillRect(dx, dy, w, h);
+      ctx.strokeRect(dx + 0.5, dy + 0.5, w - 1, h - 1);
+      ctx.fillStyle = '#e8eef9';
+      ctx.textAlign = 'center';
+      ctx.fillText(d.l, dx + w / 2, dy + 8);
+      menuButtons.push({ type: 'difficulty', key: d.k, x: dx, y: dy, w, h });
+      dx += w + 10;
+    }
+    // Toggles grid
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#cfe3ff';
+    ctx.fillText('Features', panelX + 18, panelY + 196);
+    const toggles = [
+      { k:'movingPlatforms', l:'Moving Platforms' },
+      { k:'crumblingPlatforms', l:'Crumbling Platforms' },
+      { k:'boosterRings', l:'Booster Rings' },
+      { k:'hazards', l:'Hazards' },
+      { k:'slowMoShards', l:'Slow-mo Shards' },
+      { k:'coins', l:'Coins' },
+    ];
+    const cols = 2;
+    const cw = (panelW - 36) / cols - 8;
+    const ch = 32;
+    let idx = 0;
+    for (const t of toggles) {
+      const col = idx % cols; const row = Math.floor(idx / cols);
+      const bx = panelX + 18 + col * (cw + 16);
+      const by = panelY + 220 + row * (ch + 12);
+      const on = settings.toggles[t.k];
+      ctx.fillStyle = on ? '#1a2c1a' : '#2a1b1b';
+      ctx.strokeStyle = on ? '#3a8a3a' : '#8a3a3a';
+      ctx.fillRect(bx, by, cw, ch);
+      ctx.strokeRect(bx + 0.5, by + 0.5, cw - 1, ch - 1);
+      ctx.fillStyle = '#e8eef9';
+      ctx.textAlign = 'left';
+      ctx.fillText((on ? 'ON  ' : 'OFF ') + '— ' + t.l, bx + 10, by + 8);
+      menuButtons.push({ type: 'toggle', key: t.k, x: bx, y: by, w: cw, h: ch });
+      idx++;
+    }
+    // Play button
+    const pw = 200, ph = 48;
+    const px = panelX + panelW - pw - 18;
+    const py = panelY + panelH - ph - 18;
+    ctx.fillStyle = '#1a2333';
+    ctx.strokeStyle = '#3e61a3';
+    ctx.fillRect(px, py, pw, ph);
+    ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
+    ctx.fillStyle = '#e8eef9';
+    ctx.textAlign = 'center';
+    ctx.fillText('Play', px + pw / 2, py + 14);
+    menuButtons.push({ type: 'play', x: px, y: py, w: pw, h: ph });
+    ctx.restore();
+  }
+
+  function drawLevelComplete() {
+    const ctx = window.__ctx || (window.__ctx = canvas.getContext('2d'));
+    ctx.save();
+    ctx.fillStyle = 'rgba(8,10,16,0.75)';
+    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    const panelW = 520, panelH = 240;
+    const panelX = (window.innerWidth - panelW) / 2;
+    const panelY = (window.innerHeight - panelH) / 2;
+    ctx.fillStyle = '#101726';
+    ctx.strokeStyle = '#36507a';
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.strokeRect(panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1);
+    ctx.fillStyle = '#e8eef9';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.font = '700 22px system-ui, -apple-system';
+    const levelName = levels[currentLevelIndex]?.name || `Level ${currentLevelIndex+1}`;
+    ctx.fillText(`${levelName} Complete!`, window.innerWidth / 2, panelY + 20);
+    ctx.font = '600 14px system-ui, -apple-system';
+    ctx.fillStyle = '#cfe3ff';
+    ctx.fillText(`Target: ${currentLevelTarget} — Achieved Distance: ${distanceTraveled}`, window.innerWidth / 2, panelY + 56);
+    // Buttons
+    const bw = 160, bh = 40;
+    const space = 20;
+    const y = panelY + panelH - bh - 20;
+    const bx1 = panelX + 40;
+    const bx2 = panelX + panelW / 2 - bw / 2;
+    const bx3 = panelX + panelW - bw - 40;
+    ctx.fillStyle = '#1a2333'; ctx.strokeStyle = '#3e61a3';
+    ctx.fillRect(bx1, y, bw, bh); ctx.strokeRect(bx1 + 0.5, y + 0.5, bw - 1, bh - 1);
+    ctx.fillRect(bx2, y, bw, bh); ctx.strokeRect(bx2 + 0.5, y + 0.5, bw - 1, bh - 1);
+    ctx.fillRect(bx3, y, bw, bh); ctx.strokeRect(bx3 + 0.5, y + 0.5, bw - 1, bh - 1);
+    ctx.fillStyle = '#e8eef9'; ctx.textAlign = 'center';
+    ctx.fillText('Main Menu', bx1 + bw / 2, y + 12);
+    ctx.fillText('Replay', bx2 + bw / 2, y + 12);
+    ctx.fillText('Next Level', bx3 + bw / 2, y + 12);
+    levelButtons = [
+      { key: 'menu', x: bx1, y, w: bw, h: bh },
+      { key: 'replay', x: bx2, y, w: bw, h: bh },
+      { key: 'next', x: bx3, y, w: bw, h: bh },
+    ];
+    ctx.restore();
   }
 
   function restart() {
@@ -1320,6 +1555,39 @@
     } else {
       mouse.clicked = false;
     }
+
+    // Handle start menu clicks
+    if (gamePhase === 'menu' && mouse.clicked) {
+      mouse.clicked = false;
+      for (const b of menuButtons) {
+        if (mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h) {
+          if (b.type === 'mode') gameMode = b.key;
+          else if (b.type === 'difficulty') settings.difficulty = b.key;
+          else if (b.type === 'toggle') settings.toggles[b.key] = !settings.toggles[b.key];
+          else if (b.type === 'play') { startGameWithSettings(); }
+        }
+      }
+    }
+
+    // Handle level complete / game over menu clicks
+    if ((gamePhase === 'levelComplete' || gameOver) && levelButtons && levelButtons.length && mouse.clicked) {
+      mouse.clicked = false;
+      for (const b of levelButtons) {
+        if (mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h) {
+          if (b.key === 'menu') {
+            gamePhase = 'menu'; gameOver = false; levelButtons = []; return requestAnimationFrame(frame);
+          }
+          if (b.key === 'replay') {
+            gameOver = false; levelButtons = []; resetWorld(); gamePhase = 'playing'; return requestAnimationFrame(frame);
+          }
+          if (b.key === 'next') {
+            currentLevelIndex = Math.min(currentLevelIndex + 1, levels.length - 1);
+            currentLevelTarget = levels[currentLevelIndex].distance;
+            levelButtons = []; resetWorld(); gamePhase = 'playing'; return requestAnimationFrame(frame);
+          }
+        }
+      }
+    }
     requestAnimationFrame(frame);
   }
 
@@ -1331,6 +1599,6 @@
   let slowMoTimer = 0;
   const slowMoMax = 2.5;
   let combo = 0, maxCombo = 10, comboTimer = 0, comboMaxWindow = 2.0;
-  resetWorld();
+  // Start in menu; world resets when starting game
   requestAnimationFrame(frame);
 })();
