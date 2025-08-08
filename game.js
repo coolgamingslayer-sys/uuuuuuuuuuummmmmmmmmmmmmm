@@ -1005,6 +1005,8 @@
   function draw() {
     drawBackground();
 
+    if (gamePhase === 'menu') { drawStartMenu(); return; }
+
     // Draw platforms
     ctx.lineJoin = 'round';
     for (const p of platforms) {
