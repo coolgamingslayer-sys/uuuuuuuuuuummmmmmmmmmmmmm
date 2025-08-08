@@ -38,6 +38,7 @@
   // Simple SFX via WebAudio
   let audioCtx = null;
   function playSfx(type) {
+    if (settings.graphics === 'low') return; // disable SFX in low graphics mode
     try {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const ctx = audioCtx;
@@ -428,6 +429,7 @@
       slowMoShards: true,
       coins: true,
     },
+    graphics: 'low', // 'low' | 'med' | 'high'
   };
   let menuButtons = [];
   let levelButtons = [];
@@ -616,6 +618,7 @@
           const cx = x + startOffset + i * spacing;
           coinsArray.push({ x: cx, y: coinY, size: 16, collected: false, spin: Math.random() * Math.PI * 2 });
         }
+        if (coinsArray.length > 300) coinsArray.splice(0, coinsArray.length - 300);
       }
 
       // Booster ring sometimes near end of platform
@@ -623,6 +626,7 @@
         const rx = x + randRange(60, Math.max(80, width - 60));
         const ry = y - randRange(40, 100);
         boostRings.push({ x: rx, y: ry, r: 26, hit: false });
+        if (boostRings.length > 120) boostRings.splice(0, boostRings.length - 120);
       }
 
       // Hazards: spikes or saws on top
@@ -637,6 +641,7 @@
           const sx = x + randRange(30, width - 30);
           hazards.push({ type: 'saw', x: sx, y: y - 10, r: 10, dir: Math.random() < 0.5 ? -1 : 1, range: Math.min(100, width - 40), t: Math.random() * Math.PI * 2 });
         }
+        if (hazards.length > 200) hazards.splice(0, hazards.length - 200);
       }
 
       // Slow-mo shard occasionally above platform
@@ -644,7 +649,11 @@
         const sx = x + randRange(30, width - 30);
         const sy = y - randRange(80, 140);
         slowShards.push({ x: sx, y: sy, r: 12, taken: false, spin: Math.random() * Math.PI * 2 });
+        if (slowShards.length > 120) slowShards.splice(0, slowShards.length - 120);
       }
+
+      // Cap platforms length
+      if (platforms.length > 160) platforms.splice(0, platforms.length - 160);
     }
   }
 
@@ -966,15 +975,19 @@
   // Particles
   let particles = [];
   function spawnParticles(x, y, color) {
+    if (settings.graphics === 'low') return;
     for (let i = 0; i < 10; i++) {
       particles.push({ x, y, vx: randRange(-180, 180), vy: randRange(-260, -40), life: randRange(0.3, 0.7), color });
     }
+    if (particles.length > 500) particles.splice(0, particles.length - 500);
   }
   function spawnRingBurst(x, y, color) {
+    if (settings.graphics === 'low') return;
     for (let i = 0; i < 18; i++) {
       const ang = (i / 18) * Math.PI * 2;
       particles.push({ x, y, vx: Math.cos(ang) * randRange(180, 280), vy: Math.sin(ang) * randRange(180, 280), life: randRange(0.4, 0.8), color });
     }
+    if (particles.length > 500) particles.splice(0, particles.length - 500);
   }
 
   function drawBackground() {
@@ -988,25 +1001,27 @@
     ctx.fillRect(0, 0, w, h);
 
     // Subtle parallax grid
-    ctx.save();
-    ctx.globalAlpha = 0.03;
-    const gridSize = 96;
-    const offset = -((cameraX * 0.2) % gridSize);
-    ctx.strokeStyle = '#b3c0ff';
-    ctx.lineWidth = 1;
-    for (let x = offset; x < w; x += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, h);
-      ctx.stroke();
+    if (settings.graphics !== 'low') {
+      ctx.save();
+      ctx.globalAlpha = 0.03;
+      const gridSize = 96;
+      const offset = -((cameraX * 0.2) % gridSize);
+      ctx.strokeStyle = '#b3c0ff';
+      ctx.lineWidth = 1;
+      for (let x = offset; x < w; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+      }
+      for (let y = 0; y < h; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
-    for (let y = 0; y < h; y += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
-    }
-    ctx.restore();
   }
 
   function draw() {
@@ -1030,7 +1045,7 @@
       ctx.fillStyle = fillColor;
       ctx.fillRect(sx, sy, p.width, p.height);
       // Glow outline if stepped
-      if (p.steppedAt >= 0) {
+      if (p.steppedAt >= 0 && settings.graphics === 'high') {
         ctx.save();
         ctx.shadowColor = '#ffffff';
         ctx.shadowBlur = 12;
@@ -1038,16 +1053,18 @@
         ctx.lineWidth = 2;
         ctx.strokeRect(sx + 0.5, sy + 0.5, p.width - 1, p.height - 1);
         ctx.restore();
-      } else {
+      } else if (settings.graphics !== 'low') {
         ctx.strokeStyle = '#3f567a';
         ctx.lineWidth = 2;
         ctx.strokeRect(sx + 0.5, sy + 0.5, p.width - 1, p.height - 1);
       }
       if (p.crumbling) {
-        ctx.strokeStyle = '#ffb3b3';
-        ctx.setLineDash([6, 4]);
-        ctx.strokeRect(sx + 0.5, sy + 0.5, p.width - 1, p.height - 1);
-        ctx.setLineDash([]);
+        if (settings.graphics !== 'low') {
+          ctx.strokeStyle = '#ffb3b3';
+          ctx.setLineDash([6, 4]);
+          ctx.strokeRect(sx + 0.5, sy + 0.5, p.width - 1, p.height - 1);
+          ctx.setLineDash([]);
+        }
       }
     }
 
@@ -1058,6 +1075,11 @@
       const sx = Math.floor(c.x - cameraX);
       const sy = Math.floor(c.y);
       if (sx < -60 || sx > window.innerWidth + 60) continue;
+      if (settings.graphics === 'low') {
+        ctx.fillStyle = '#ffd84a';
+        ctx.fillRect(sx - 4, sy - 4, 8, 8);
+        continue;
+      }
       const t = (timeAlive + c.spin) * 6;
       const w = c.size * (0.6 + 0.4 * Math.abs(Math.cos(t)));
       const h = c.size;
@@ -1072,11 +1094,13 @@
       ctx.fill();
       ctx.stroke();
       // Shine
-      ctx.globalAlpha = 0.7;
-      ctx.fillStyle = '#fff7b0';
-      ctx.beginPath();
-      ctx.ellipse(-w * 0.15, -h * 0.15, w * 0.15, h * 0.15, 0, 0, Math.PI * 2);
-      ctx.fill();
+      if (settings.graphics !== 'low') {
+        ctx.globalAlpha = 0.7;
+        ctx.fillStyle = '#fff7b0';
+        ctx.beginPath();
+        ctx.ellipse(-w * 0.15, -h * 0.15, w * 0.15, h * 0.15, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     }
 
@@ -1086,6 +1110,11 @@
       const sx = Math.floor(r.x - cameraX);
       const sy = Math.floor(r.y);
       if (sx < -80 || sx > window.innerWidth + 80) continue;
+      if (settings.graphics === 'low') {
+        ctx.strokeStyle = '#8cf2ff';
+        ctx.strokeRect(sx - 12, sy - 12, 24, 24);
+        continue;
+      }
       ctx.save();
       ctx.strokeStyle = r.hit ? '#7fdcea' : '#8cf2ff';
       ctx.lineWidth = 4;
@@ -1104,27 +1133,35 @@
         const sx = Math.floor(h.x - cameraX);
         const sy = Math.floor(h.y);
         if (sx < -80 || sx > window.innerWidth + 80) continue;
-        ctx.fillStyle = '#e05e5e';
-        ctx.beginPath();
-        ctx.moveTo(sx, sy + h.h);
-        ctx.lineTo(sx + h.w / 2, sy);
-        ctx.lineTo(sx + h.w, sy + h.h);
-        ctx.closePath();
-        ctx.fill();
+        if (settings.graphics === 'low') {
+          ctx.fillRect(sx, sy, h.w, 4);
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(sx, sy + h.h);
+          ctx.lineTo(sx + h.w / 2, sy);
+          ctx.lineTo(sx + h.w, sy + h.h);
+          ctx.closePath();
+          ctx.fill();
+        }
       } else if (h.type === 'saw') {
         const sx = Math.floor((h.curX ?? h.x) - cameraX);
         const sy = Math.floor(h.curY ?? h.y);
         if (sx < -80 || sx > window.innerWidth + 80) continue;
-        ctx.save();
-        ctx.translate(sx, sy);
-        ctx.fillStyle = '#f2f2f2';
-        ctx.strokeStyle = '#9e9e9e';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, h.r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
+        if (settings.graphics === 'low') {
+          ctx.fillStyle = '#cfcfcf';
+          ctx.fillRect(sx - h.r, sy - 2, h.r * 2, 4);
+        } else {
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.fillStyle = '#f2f2f2';
+          ctx.strokeStyle = '#9e9e9e';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, h.r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        }
       }
     }
 
@@ -1135,24 +1172,29 @@
       const sx = Math.floor(s.x - cameraX);
       const sy = Math.floor(s.y);
       if (sx < -80 || sx > window.innerWidth + 80) continue;
-      ctx.save();
-      ctx.translate(sx, sy);
-      ctx.rotate((timeAlive + s.spin) * 2);
-      ctx.fillStyle = '#b0c7ff';
-      ctx.strokeStyle = '#7f98db';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let i2 = 0; i2 < 5; i2++) {
-        const ang = i2 * (Math.PI * 2 / 5);
-        const r1 = s.r;
-        const r2 = s.r * 0.5;
-        ctx.lineTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
-        ctx.lineTo(Math.cos(ang + Math.PI / 5) * r2, Math.sin(ang + Math.PI / 5) * r2);
+      if (settings.graphics === 'low') {
+        ctx.fillStyle = '#b0c7ff';
+        ctx.fillRect(sx - 6, sy - 6, 12, 12);
+      } else {
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate((timeAlive + s.spin) * 2);
+        ctx.fillStyle = '#b0c7ff';
+        ctx.strokeStyle = '#7f98db';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i2 = 0; i2 < 5; i2++) {
+          const ang = i2 * (Math.PI * 2 / 5);
+          const r1 = s.r;
+          const r2 = s.r * 0.5;
+          ctx.lineTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
+          ctx.lineTo(Math.cos(ang + Math.PI / 5) * r2, Math.sin(ang + Math.PI / 5) * r2);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
       }
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
     }
 
     // Draw chaser border as a translucent red wall
@@ -1207,7 +1249,7 @@
     }
 
     // Particles
-    for (const p of particles) {
+    if (settings.graphics !== 'low') for (const p of particles) {
       const sx = Math.floor(p.x - cameraX);
       const sy = Math.floor(p.y);
       ctx.fillStyle = p.color;
@@ -1497,6 +1539,26 @@ const w = 240, h = 8;
     ctx.textAlign = 'center';
     ctx.fillText('Play', px + pw / 2, py + 14);
     menuButtons.push({ type: 'play', x: px, y: py, w: pw, h: ph });
+
+    // Graphics buttons
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#cfe3ff';
+    ctx.fillText('Graphics', panelX + 18, panelY + 272);
+    const gfx = [ {k:'low',l:'Low'}, {k:'med',l:'Medium'}, {k:'high',l:'High'} ];
+    let gx = panelX + 18; const gy = panelY + 294;
+    for (const gopt of gfx) {
+      const sel = settings.graphics === gopt.k;
+      const w = 110, h = 32;
+      ctx.fillStyle = sel ? '#1e2a40' : '#151b28';
+      ctx.strokeStyle = sel ? '#3e61a3' : '#2a3a56';
+      ctx.fillRect(gx, gy, w, h);
+      ctx.strokeRect(gx + 0.5, gy + 0.5, w - 1, h - 1);
+      ctx.fillStyle = '#e8eef9';
+      ctx.textAlign = 'center';
+      ctx.fillText(gopt.l, gx + w / 2, gy + 8);
+      menuButtons.push({ type: 'graphics', key: gopt.k, x: gx, y: gy, w, h });
+      gx += w + 10;
+    }
     ctx.restore();
   }
 
@@ -1588,6 +1650,7 @@ const w = 240, h = 8;
           if (b.type === 'mode') gameMode = b.key;
           else if (b.type === 'difficulty') settings.difficulty = b.key;
           else if (b.type === 'toggle') settings.toggles[b.key] = !settings.toggles[b.key];
+          else if (b.type === 'graphics') settings.graphics = b.key;
           else if (b.type === 'play') { startGameWithSettings(); }
         }
       }
