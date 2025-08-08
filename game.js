@@ -648,7 +648,7 @@
   }
 
   function removeBehindPlatforms(minWorldX) {
-    if (platforms.length < 64) return; // cheap guard
+    if (platforms.length < 16) return; // cheap guard
     platforms = platforms.filter(p => p.x + p.width > minWorldX);
     coinsArray = coinsArray.filter(c => c.x + 32 > minWorldX && !c.collected);
     hazards = hazards.filter(h => (h.x || 0) + (h.w || h.r || 0) > minWorldX);
@@ -722,7 +722,8 @@
     }
 
     // Update moving/crumbling platforms motion
-    for (const p of platforms) {
+    for (let i = 0; i < platforms.length; i++) {
+      const p = platforms[i];
       if (p.move) {
         const t = (timeAlive + p.move.phase) / p.move.period;
         const off = Math.sin(t * Math.PI * 2) * p.move.amp;
@@ -801,7 +802,8 @@
 
     // Coin collection
     const playerBox = { x: player.x, y: player.y, w: player.width, h: player.height };
-    for (const c of coinsArray) {
+    for (let i = 0; i < coinsArray.length; i++) {
+      const c = coinsArray[i];
       if (c.collected) continue;
       const cx = c.x - c.size / 2;
       const cy = c.y - c.size / 2;
@@ -835,7 +837,8 @@
     }
 
     // Booster rings
-    for (const r of boostRings) {
+    for (let i = 0; i < boostRings.length; i++) {
+      const r = boostRings[i];
       if (r.hit) continue;
       const cx = player.x + player.width / 2;
       const cy = player.y + player.height / 2;
@@ -852,9 +855,9 @@
     }
 
     // Hazards
-    for (const h of hazards) {
+    for (let i = 0; i < hazards.length; i++) {
+      const h = hazards[i];
       if (h.type === 'saw') {
-        // Move saw along a small circle along x
         h.t += sdt * 1.6 * h.dir;
         const ox = Math.cos(h.t) * (h.range / 2);
         h.curX = h.x + ox;
@@ -899,7 +902,7 @@
     }
 
     // Generate new platforms ahead and prune behind
-    ensureAheadPlatforms(cameraX + window.innerWidth * 2.5);
+    ensureAheadPlatforms(cameraX + window.innerWidth * 1.6);
     removeBehindPlatforms(chaserX - 400);
 
     // Death conditions
@@ -983,7 +986,7 @@
     // Subtle parallax grid
     ctx.save();
     ctx.globalAlpha = 0.05;
-    const gridSize = 64;
+    const gridSize = 96;
     const offset = -((cameraX * 0.2) % gridSize);
     ctx.strokeStyle = '#b3c0ff';
     ctx.lineWidth = 1;
@@ -1009,10 +1012,11 @@
 
     // Draw platforms
     ctx.lineJoin = 'round';
-    for (const p of platforms) {
+    for (let i = 0; i < platforms.length; i++) {
+      const p = platforms[i];
       const sx = Math.floor(p.x - cameraX);
       const sy = Math.floor(p.y);
-      if (sx > window.innerWidth || sx + p.width < -200) continue;
+      if (sx > window.innerWidth + 200 || sx + p.width < -200) continue;
       const baseFill = '#25334a';
       let fillColor = baseFill;
       if (p.steppedAt >= 0) {
@@ -1044,11 +1048,12 @@
     }
 
     // Draw coins
-    for (const c of coinsArray) {
+    for (let i = 0; i < coinsArray.length; i++) {
+      const c = coinsArray[i];
       if (c.collected) continue;
       const sx = Math.floor(c.x - cameraX);
       const sy = Math.floor(c.y);
-      if (sx < -40 || sx > window.innerWidth + 40) continue;
+      if (sx < -60 || sx > window.innerWidth + 60) continue;
       const t = (timeAlive + c.spin) * 6;
       const w = c.size * (0.6 + 0.4 * Math.abs(Math.cos(t)));
       const h = c.size;
@@ -1072,10 +1077,11 @@
     }
 
     // Draw booster rings
-    for (const r of boostRings) {
+    for (let i = 0; i < boostRings.length; i++) {
+      const r = boostRings[i];
       const sx = Math.floor(r.x - cameraX);
       const sy = Math.floor(r.y);
-      if (sx < -60 || sx > window.innerWidth + 60) continue;
+      if (sx < -80 || sx > window.innerWidth + 80) continue;
       ctx.save();
       ctx.strokeStyle = r.hit ? '#7fdcea' : '#8cf2ff';
       ctx.lineWidth = 4;
@@ -1088,10 +1094,12 @@
     }
 
     // Draw hazards
-    for (const h of hazards) {
+    for (let i = 0; i < hazards.length; i++) {
+      const h = hazards[i];
       if (h.type === 'spike') {
         const sx = Math.floor(h.x - cameraX);
         const sy = Math.floor(h.y);
+        if (sx < -80 || sx > window.innerWidth + 80) continue;
         ctx.fillStyle = '#e05e5e';
         ctx.beginPath();
         ctx.moveTo(sx, sy + h.h);
@@ -1102,6 +1110,7 @@
       } else if (h.type === 'saw') {
         const sx = Math.floor((h.curX ?? h.x) - cameraX);
         const sy = Math.floor(h.curY ?? h.y);
+        if (sx < -80 || sx > window.innerWidth + 80) continue;
         ctx.save();
         ctx.translate(sx, sy);
         ctx.fillStyle = '#f2f2f2';
@@ -1116,10 +1125,12 @@
     }
 
     // Draw slow-mo shards
-    for (const s of slowShards) {
+    for (let i = 0; i < slowShards.length; i++) {
+      const s = slowShards[i];
       if (s.taken) continue;
       const sx = Math.floor(s.x - cameraX);
       const sy = Math.floor(s.y);
+      if (sx < -80 || sx > window.innerWidth + 80) continue;
       ctx.save();
       ctx.translate(sx, sy);
       ctx.rotate((timeAlive + s.spin) * 2);
@@ -1127,8 +1138,8 @@
       ctx.strokeStyle = '#7f98db';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      for (let i = 0; i < 5; i++) {
-        const ang = i * (Math.PI * 2 / 5);
+      for (let i2 = 0; i2 < 5; i2++) {
+        const ang = i2 * (Math.PI * 2 / 5);
         const r1 = s.r;
         const r2 = s.r * 0.5;
         ctx.lineTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
@@ -1197,7 +1208,7 @@
       const sy = Math.floor(p.y);
       ctx.fillStyle = p.color;
       ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 2));
-      ctx.fillRect(sx, sy, 3, 3);
+      ctx.fillRect(sx, sy, 2, 2);
       ctx.globalAlpha = 1;
     }
 
@@ -1537,7 +1548,7 @@ const w = 240, h = 8;
   // Main loop
   let lastTime = performance.now();
   function frame(now) {
-    const dt = Math.min(0.033, (now - lastTime) / 1000);
+    const dt = Math.min(0.02, (now - lastTime) / 1000);
     lastTime = now;
     update(dt);
     // Animation timers/state
