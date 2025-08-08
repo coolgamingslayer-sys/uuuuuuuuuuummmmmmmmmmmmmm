@@ -34,6 +34,31 @@
     return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
   }
 
+  // Simple SFX via WebAudio
+  let audioCtx = null;
+  function playSfx(type) {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = audioCtx;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      let f = 440, dur = 0.08, typeWave = 'sine', vol = 0.08;
+      if (type === 'coin') { f = 880; dur = 0.06; typeWave = 'square'; vol = 0.06; }
+      if (type === 'boost') { f = 220; dur = 0.16; typeWave = 'sawtooth'; vol = 0.08; }
+      if (type === 'hit') { f = 120; dur = 0.12; typeWave = 'triangle'; vol = 0.08; }
+      if (type === 'revive') { f = 520; dur = 0.18; typeWave = 'sine'; vol = 0.1; }
+      if (type === 'slowmo') { f = 300; dur = 0.2; typeWave = 'triangle'; vol = 0.07; }
+      o.type = typeWave;
+      o.frequency.value = f;
+      const t0 = ctx.currentTime;
+      g.gain.setValueAtTime(vol, t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.start(t0);
+      o.stop(t0 + dur);
+    } catch {}
+  }
+
   // Pixel-art sprite generation (16x16) for a running character
   function createPixelManFrames() {
     const SIZE = 16;
@@ -406,7 +431,7 @@
   }
 
   function createPlatform(x, y, w, h) {
-    return { x, y, width: w, height: h, steppedAt: -1 };
+    return { x, y, width: w, height: h, baseX: x, baseY: y, steppedAt: -1, move: null, crumbleAt: -1, crumbling: false, vy: 0 };
   }
 
   function aabbIntersect(ax, ay, aw, ah, bx, by, bw, bh) {
@@ -433,6 +458,10 @@
     coins = 0;
     coinsCollectedThisRun = 0;
     coinsArray = [];
+    hazards = [];
+    boostRings = [];
+    slowShards = [];
+    particles = [];
     upgrades = {
       speedLevel: 0,
       jumpLevel: 0,
@@ -497,6 +526,16 @@
       lastPlatformEndX = x + width;
       lastPlatformY = y;
 
+      // Randomly let some platforms move (gentle sine oscillation)
+      const p = platforms[platforms.length - 1];
+      if (Math.random() < 0.18) {
+        const axis = Math.random() < 0.6 ? 'y' : 'x';
+        const amp = axis === 'y' ? randRange(18, 48) : randRange(20, 60);
+        const period = randRange(2.4, 4.8);
+        const phase = Math.random() * Math.PI * 2;
+        p.move = { axis, amp, period, phase };
+      }
+
       // Optional small hazard bumps or short stacks for variety
       if (Math.random() < 0.3) {
         const numSteps = randInt(1, 3);
@@ -522,6 +561,34 @@
           coinsArray.push({ x: cx, y: coinY, size: 16, collected: false, spin: Math.random() * Math.PI * 2 });
         }
       }
+
+      // Booster ring sometimes near end of platform
+      if (Math.random() < 0.22) {
+        const rx = x + randRange(60, Math.max(80, width - 60));
+        const ry = y - randRange(40, 100);
+        boostRings.push({ x: rx, y: ry, r: 26, hit: false });
+      }
+
+      // Hazards: spikes or saws on top
+      if (Math.random() < 0.25 && width > 120) {
+        if (Math.random() < 0.6) {
+          const num = randInt(2, 5);
+          const start = x + randRange(10, width - 60);
+          for (let i = 0; i < num; i++) {
+            hazards.push({ type: 'spike', x: start + i * 20, y: y - 12, w: 18, h: 12 });
+          }
+        } else {
+          const sx = x + randRange(30, width - 30);
+          hazards.push({ type: 'saw', x: sx, y: y - 10, r: 10, dir: Math.random() < 0.5 ? -1 : 1, range: Math.min(100, width - 40), t: Math.random() * Math.PI * 2 });
+        }
+      }
+
+      // Slow-mo shard occasionally above platform
+      if (Math.random() < 0.14) {
+        const sx = x + randRange(30, width - 30);
+        const sy = y - randRange(80, 140);
+        slowShards.push({ x: sx, y: sy, r: 12, taken: false, spin: Math.random() * Math.PI * 2 });
+      }
     }
   }
 
@@ -529,31 +596,37 @@
     if (platforms.length < 64) return; // cheap guard
     platforms = platforms.filter(p => p.x + p.width > minWorldX);
     coinsArray = coinsArray.filter(c => c.x + 32 > minWorldX && !c.collected);
+    hazards = hazards.filter(h => (h.x || 0) + (h.w || h.r || 0) > minWorldX);
+    boostRings = boostRings.filter(r => r.x + r.r > minWorldX);
+    slowShards = slowShards.filter(s => s.x + s.r > minWorldX && !s.taken);
+    particles = particles.filter(pt => pt.life > 0);
   }
 
   function update(dt) {
     if (gameOver) return;
     if (isUpgradeMenuOpen) return; // pause everything except menu
 
-    timeAlive += dt;
+    const sdt = dt * globalTimeScale;
+    timeAlive += sdt;
 
     // Difficulty ramp: slowly increase chaser speed
     const targetSpeed = Math.min(
       CHASER.baseSpeed + chaserSpeedBonus + timeAlive * (CHASER.accel * 0.1),
       CHASER.maxSpeed + chaserMaxBonus
     );
-    chaserSpeed += (targetSpeed - chaserSpeed) * Math.min(1, dt * 0.5);
-    chaserX += chaserSpeed * dt;
+    chaserSpeed += (targetSpeed - chaserSpeed) * Math.min(1, sdt * 0.5);
+    const chaserFactor = slowMoTimer > 0 ? 0.85 : 1.0;
+    chaserX += chaserSpeed * chaserFactor * sdt;
 
     // Input to movement
     const desired = (input.right ? 1 : 0) - (input.left ? 1 : 0);
 
     // Horizontal acceleration/deceleration
     if (desired !== 0) {
-      player.vx += desired * stats.runAccel * dt;
+      player.vx += desired * stats.runAccel * sdt;
     } else {
       // decelerate towards zero
-      const decel = stats.runDecel * dt;
+      const decel = stats.runDecel * sdt;
       if (Math.abs(player.vx) <= decel) player.vx = 0; else player.vx -= Math.sign(player.vx) * decel;
     }
     player.vx = clamp(player.vx, -stats.maxRunSpeed, stats.maxRunSpeed);
@@ -570,14 +643,14 @@
       player.jumpBufferTimer = PLAYER.jumpBufferTime;
       input.jumpPressed = false;
     } else if (player.jumpBufferTimer > 0) {
-      player.jumpBufferTimer -= dt;
+      player.jumpBufferTimer -= sdt;
     }
 
-    if (player.onGround) player.coyoteTimer = PLAYER.coyoteTime; else if (player.coyoteTimer > 0) player.coyoteTimer -= dt;
+    if (player.onGround) player.coyoteTimer = PLAYER.coyoteTime; else if (player.coyoteTimer > 0) player.coyoteTimer -= sdt;
 
     // Apply gravity
     const gravityMultiplier = (!player.onGround && upgrades.glide && input.up && player.vy > 0) ? 0.55 : 1.0;
-    player.vy += GRAVITY * gravityMultiplier * dt;
+    player.vy += GRAVITY * gravityMultiplier * sdt;
 
     // Attempt jump
     if (player.jumpBufferTimer > 0 && player.coyoteTimer > 0) {
@@ -593,9 +666,26 @@
       player.jumpBufferTimer = 0;
     }
 
+    // Update moving/crumbling platforms motion
+    for (const p of platforms) {
+      if (p.move) {
+        const t = (timeAlive + p.move.phase) / p.move.period;
+        const off = Math.sin(t * Math.PI * 2) * p.move.amp;
+        if (p.move.axis === 'y') p.y = p.baseY + off; else p.x = p.baseX + off;
+      }
+      if (!p.crumbling && p.crumbleAt > 0 && timeAlive > p.crumbleAt) {
+        p.crumbling = true; p.vy = randRange(120, 220);
+      }
+      if (p.crumbling) {
+        p.y += p.vy * sdt;
+        p.vy += 900 * sdt;
+      }
+    }
+    platforms = platforms.filter(p => p.y < window.innerHeight + 800);
+
     // Integrate and resolve collisions axis-by-axis
     // Horizontal
-    player.x += player.vx * dt;
+    player.x += player.vx * sdt;
     let collidedX = false;
     for (const p of platforms) {
       if (aabbIntersect(player.x, player.y, player.width, player.height, p.x, p.y, p.width, p.height)) {
@@ -611,7 +701,7 @@
     if (collidedX) player.vx = 0;
 
     // Vertical
-    player.y += player.vy * dt;
+    player.y += player.vy * sdt;
     let onGroundNow = false;
     let groundPlatform = null;
     for (const p of platforms) {
@@ -640,11 +730,15 @@
       }
       // Record last safe snapshot
       lastSafeSnapshot = { x: player.x, y: player.y, chaserX: chaserX };
+      // Start crumble timer on first step for some platforms
+      if (Math.random() < 0.4 && groundPlatform.crumbleAt < 0) {
+        groundPlatform.crumbleAt = timeAlive + randRange(0.4, 1.0);
+      }
     }
 
     // Camera follows ahead of player a bit
     const desiredCamX = player.x - 260 + clamp(player.vx, 0, 220) * 0.25;
-    cameraX += (desiredCamX - cameraX) * Math.min(1, dt * 3);
+    cameraX += (desiredCamX - cameraX) * Math.min(1, sdt * 3);
 
     // Score is max distance ahead of start relative to chaser
     score = Math.max(score, Math.floor(player.x - chaserX));
@@ -660,6 +754,10 @@
         c.collected = true;
         coins += upgrades.coinValue || 1;
         coinsCollectedThisRun += 1;
+        combo = Math.min(combo + 1, maxCombo);
+        comboTimer = comboMaxWindow;
+        spawnParticles(c.x, c.y, '#ffd84a');
+        playSfx('coin');
         continue;
       }
       // Magnet collection
@@ -673,8 +771,76 @@
           c.collected = true;
           coins += upgrades.coinValue || 1;
           coinsCollectedThisRun += 1;
+          combo = Math.min(combo + 1, maxCombo);
+          comboTimer = comboMaxWindow;
+          spawnParticles(c.x, c.y, '#ffd84a');
+          playSfx('coin');
         }
       }
+    }
+
+    // Booster rings
+    for (const r of boostRings) {
+      if (r.hit) continue;
+      const cx = player.x + player.width / 2;
+      const cy = player.y + player.height / 2;
+      const d = Math.hypot((r.x - cx), (r.y - cy));
+      if (d < r.r + 10) {
+        r.hit = true;
+        player.vx = Math.max(player.vx, stats.maxRunSpeed * 1.2);
+        coins += 3 * (upgrades.coinValue || 1);
+        combo = Math.min(combo + 3, maxCombo);
+        comboTimer = comboMaxWindow;
+        spawnRingBurst(r.x, r.y, '#8cf2ff');
+        playSfx('boost');
+      }
+    }
+
+    // Hazards
+    for (const h of hazards) {
+      if (h.type === 'saw') {
+        // Move saw along a small circle along x
+        h.t += sdt * 1.6 * h.dir;
+        const ox = Math.cos(h.t) * (h.range / 2);
+        h.curX = h.x + ox;
+        h.curY = h.y;
+        if (circleRectIntersect(h.curX, h.curY, h.r, player.x, player.y, player.width, player.height)) {
+          onHazardHit();
+        }
+      } else if (h.type === 'spike') {
+        if (aabbIntersect(player.x, player.y, player.width, player.height, h.x, h.y, h.w, h.h)) {
+          onHazardHit();
+        }
+      }
+    }
+
+    // Slow-mo shards
+    for (const s of slowShards) {
+      if (s.taken) continue;
+      const cx = player.x + player.width / 2;
+      const cy = player.y + player.height / 2;
+      if (circleRectIntersect(s.x, s.y, s.r, player.x, player.y, player.width, player.height)) {
+        s.taken = true;
+        slowMoTimer = 2.5;
+        globalTimeScale = 0.6;
+        playSfx('slowmo');
+        spawnRingBurst(s.x, s.y, '#b0c7ff');
+      }
+    }
+
+    // Update combo timer and slow-mo timer
+    if (comboTimer > 0) {
+      comboTimer -= sdt;
+      if (comboTimer <= 0) combo = 0;
+    }
+    if (slowMoTimer > 0) {
+      slowMoTimer -= dt; // fade by real time for feel
+      if (slowMoTimer <= 0) { slowMoTimer = 0; globalTimeScale = 1; }
+    }
+
+    // Update particles
+    for (const p of particles) {
+      p.vx *= 0.98; p.vy += 900 * sdt; p.x += p.vx * sdt; p.y += p.vy * sdt; p.life -= sdt;
     }
 
     // Generate new platforms ahead and prune behind
@@ -697,10 +863,50 @@
         player.vy = 0;
         player.onGround = true;
         chaserX = Math.min(chaserX, player.x - 300);
+        playSfx('revive');
       } else {
         gameOver = true;
         deathReason = 'You fell...';
       }
+    }
+  }
+
+  function circleRectIntersect(cx, cy, r, rx, ry, rw, rh) {
+    const closestX = clamp(cx, rx, rx + rw);
+    const closestY = clamp(cy, ry, ry + rh);
+    const dx = cx - closestX;
+    const dy = cy - closestY;
+    return (dx * dx + dy * dy) <= r * r;
+  }
+
+  function onHazardHit() {
+    if (upgrades.extraLives && lastSafeSnapshot) {
+      upgrades.extraLives -= 1;
+      player.x = lastSafeSnapshot.x;
+      player.y = lastSafeSnapshot.y;
+      player.vx = 0;
+      player.vy = 0;
+      player.onGround = true;
+      chaserX = Math.min(chaserX, player.x - 300);
+      playSfx('revive');
+    } else {
+      gameOver = true;
+      deathReason = 'Ouch!';
+      playSfx('hit');
+    }
+  }
+
+  // Particles
+  let particles = [];
+  function spawnParticles(x, y, color) {
+    for (let i = 0; i < 10; i++) {
+      particles.push({ x, y, vx: randRange(-180, 180), vy: randRange(-260, -40), life: randRange(0.3, 0.7), color });
+    }
+  }
+  function spawnRingBurst(x, y, color) {
+    for (let i = 0; i < 18; i++) {
+      const ang = (i / 18) * Math.PI * 2;
+      particles.push({ x, y, vx: Math.cos(ang) * randRange(180, 280), vy: Math.sin(ang) * randRange(180, 280), life: randRange(0.4, 0.8), color });
     }
   }
 
@@ -767,6 +973,12 @@
         ctx.lineWidth = 2;
         ctx.strokeRect(sx + 0.5, sy + 0.5, p.width - 1, p.height - 1);
       }
+      if (p.crumbling) {
+        ctx.strokeStyle = '#ffb3b3';
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(sx + 0.5, sy + 0.5, p.width - 1, p.height - 1);
+        ctx.setLineDash([]);
+      }
     }
 
     // Draw coins
@@ -794,6 +1006,75 @@
       ctx.beginPath();
       ctx.ellipse(-w * 0.15, -h * 0.15, w * 0.15, h * 0.15, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
+    }
+
+    // Draw booster rings
+    for (const r of boostRings) {
+      const sx = Math.floor(r.x - cameraX);
+      const sy = Math.floor(r.y);
+      if (sx < -60 || sx > window.innerWidth + 60) continue;
+      ctx.save();
+      ctx.strokeStyle = r.hit ? '#7fdcea' : '#8cf2ff';
+      ctx.lineWidth = 4;
+      ctx.shadowColor = '#8cf2ff';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r.r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Draw hazards
+    for (const h of hazards) {
+      if (h.type === 'spike') {
+        const sx = Math.floor(h.x - cameraX);
+        const sy = Math.floor(h.y);
+        ctx.fillStyle = '#e05e5e';
+        ctx.beginPath();
+        ctx.moveTo(sx, sy + h.h);
+        ctx.lineTo(sx + h.w / 2, sy);
+        ctx.lineTo(sx + h.w, sy + h.h);
+        ctx.closePath();
+        ctx.fill();
+      } else if (h.type === 'saw') {
+        const sx = Math.floor((h.curX ?? h.x) - cameraX);
+        const sy = Math.floor(h.curY ?? h.y);
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.fillStyle = '#f2f2f2';
+        ctx.strokeStyle = '#9e9e9e';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, h.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // Draw slow-mo shards
+    for (const s of slowShards) {
+      if (s.taken) continue;
+      const sx = Math.floor(s.x - cameraX);
+      const sy = Math.floor(s.y);
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate((timeAlive + s.spin) * 2);
+      ctx.fillStyle = '#b0c7ff';
+      ctx.strokeStyle = '#7f98db';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const ang = i * (Math.PI * 2 / 5);
+        const r1 = s.r;
+        const r2 = s.r * 0.5;
+        ctx.lineTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
+        ctx.lineTo(Math.cos(ang + Math.PI / 5) * r2, Math.sin(ang + Math.PI / 5) * r2);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
       ctx.restore();
     }
 
@@ -844,6 +1125,16 @@
     );
     ctx.restore();
 
+    // Particles
+    for (const p of particles) {
+      const sx = Math.floor(p.x - cameraX);
+      const sy = Math.floor(p.y);
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 2));
+      ctx.fillRect(sx, sy, 3, 3);
+      ctx.globalAlpha = 1;
+    }
+
     // UI
     ctx.fillStyle = '#e8eef9';
     ctx.font = '600 16px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial';
@@ -851,9 +1142,13 @@
     ctx.textBaseline = 'top';
     ctx.fillText(`Speed: ${Math.round(chaserSpeed)}  Score: ${score}`, 16, 12);
     ctx.fillText(`Coins: ${coins}`, 16, 34);
+    if (combo > 1) {
+      ctx.fillStyle = '#8cf2ff';
+      ctx.fillText(`Combo x${combo}`, 16, 56);
+    }
     if (bestScore != null) {
       ctx.fillStyle = '#a9b8d6';
-      ctx.fillText(`Best: ${bestScore}`, 16, 54);
+      ctx.fillText(`Best: ${bestScore}`, 16, 76);
     }
 
     // Controls hint
@@ -868,6 +1163,21 @@
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#e8eef9';
     ctx.fillText(`Distance: ${distanceTraveled}`, window.innerWidth / 2, window.innerHeight - 10);
+
+    // Slow-mo bar (top center)
+    if (slowMoTimer > 0) {
+      const w = 240, h = 8;
+      const x = (window.innerWidth - w) / 2;
+      const y = 40;
+      ctx.fillStyle = '#1a2333';
+      ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = '#b0c7ff';
+      const pct = slowMoTimer / slowMoMax;
+      ctx.fillRect(x, y, w * pct, h);
+      ctx.strokeStyle = '#3e61a3';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    }
 
     // Upgrades overlay menu
     if (isUpgradeMenuOpen && !gameOver) {
@@ -1014,6 +1324,13 @@
   }
 
   // Start
+  let hazards = [];
+  let boostRings = [];
+  let slowShards = [];
+  let globalTimeScale = 1;
+  let slowMoTimer = 0;
+  const slowMoMax = 2.5;
+  let combo = 0, maxCombo = 10, comboTimer = 0, comboMaxWindow = 2.0;
   resetWorld();
   requestAnimationFrame(frame);
 })();
