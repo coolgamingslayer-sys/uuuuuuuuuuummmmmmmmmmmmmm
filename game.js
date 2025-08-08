@@ -398,7 +398,7 @@
   };
 
   // World state
-  let player, platforms, cameraX, chaserX, chaserSpeed, score, bestScore, timeAlive, gameOver, deathReason;
+  let player, platforms, cameraX = 0, chaserX, chaserSpeed, score, bestScore, timeAlive, gameOver, deathReason;
   let spriteFrames = null;
   let facing = 1; // 1 = right, -1 = left
   let animTimer = 0;
@@ -1141,51 +1141,55 @@
     }
 
     // Draw chaser border as a translucent red wall
-    const chaserScreenX = Math.floor(chaserX - cameraX);
-    ctx.save();
-    ctx.fillStyle = 'rgba(220, 60, 60, 0.18)';
-    ctx.fillRect(0, 0, clamp(chaserScreenX, 0, window.innerWidth), window.innerHeight);
-    ctx.strokeStyle = '#ff4d4d';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(chaserScreenX + 0.5, 0);
-    ctx.lineTo(chaserScreenX + 0.5, window.innerHeight);
-    ctx.stroke();
-    ctx.restore();
-
-    // Draw player (pixel-art sprite)
-    const px = Math.floor(player.x - cameraX);
-    const py = Math.floor(player.y);
-
-    // Select frame based on state
-    let frameCanvas;
-    const isAir = !player.onGround;
-    const isMoving = Math.abs(player.vx) > 10;
-    if (isAir) {
-      frameCanvas = spriteFrames.jump[0];
-    } else if (isMoving) {
-      frameCanvas = spriteFrames.run[runFrameIndex % spriteFrames.run.length];
-    } else {
-      frameCanvas = spriteFrames.idle[0];
+    if (typeof chaserX === 'number') {
+      const chaserScreenX = Math.floor(chaserX - cameraX);
+      ctx.save();
+      ctx.fillStyle = 'rgba(220, 60, 60, 0.18)';
+      ctx.fillRect(0, 0, clamp(chaserScreenX, 0, window.innerWidth), window.innerHeight);
+      ctx.strokeStyle = '#ff4d4d';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(chaserScreenX + 0.5, 0);
+      ctx.lineTo(chaserScreenX + 0.5, window.innerHeight);
+      ctx.stroke();
+      ctx.restore();
     }
 
-    ctx.save();
-    ctx.translate(px + player.width / 2, py + player.height / 2);
-    const tilt = clamp(player.vx / stats.maxRunSpeed, -1, 1) * 0.15;
-    ctx.rotate(tilt);
-    if (facing < 0) ctx.scale(-1, 1);
-    ctx.imageSmoothingEnabled = false;
-    const fw = spriteFrames.size;
-    const fh = spriteFrames.size;
-    ctx.drawImage(
-      frameCanvas,
-      0, 0, fw, fh,
-      -player.width / 2,
-      -player.height / 2,
-      player.width,
-      player.height
-    );
-    ctx.restore();
+    // Draw player (pixel-art sprite)
+    if (player) {
+      const px = Math.floor(player.x - cameraX);
+      const py = Math.floor(player.y);
+
+      // Select frame based on state
+      let frameCanvas;
+      const isAir = !player.onGround;
+      const isMoving = Math.abs(player.vx) > 10;
+      if (isAir) {
+        frameCanvas = spriteFrames.jump[0];
+      } else if (isMoving) {
+        frameCanvas = spriteFrames.run[runFrameIndex % spriteFrames.run.length];
+      } else {
+        frameCanvas = spriteFrames.idle[0];
+      }
+
+      ctx.save();
+      ctx.translate(px + player.width / 2, py + player.height / 2);
+      const tilt = clamp(player.vx / stats.maxRunSpeed, -1, 1) * 0.15;
+      ctx.rotate(tilt);
+      if (facing < 0) ctx.scale(-1, 1);
+      ctx.imageSmoothingEnabled = false;
+      const fw = spriteFrames.size;
+      const fh = spriteFrames.size;
+      ctx.drawImage(
+        frameCanvas,
+        0, 0, fw, fh,
+        -player.width / 2,
+        -player.height / 2,
+        player.width,
+        player.height
+      );
+      ctx.restore();
+    }
 
     // Particles
     for (const p of particles) {
@@ -1198,19 +1202,21 @@
     }
 
     // UI
-    ctx.fillStyle = '#e8eef9';
-    ctx.font = '600 16px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText(`Speed: ${Math.round(chaserSpeed)}  Score: ${score}`, 16, 12);
-    ctx.fillText(`Coins: ${coins}`, 16, 34);
-    if (combo > 1) {
-      ctx.fillStyle = '#8cf2ff';
-      ctx.fillText(`Combo x${combo}`, 16, 56);
-    }
-    if (bestScore != null) {
-      ctx.fillStyle = '#a9b8d6';
-      ctx.fillText(`Best: ${bestScore}`, 16, 76);
+    if (gamePhase === 'playing') {
+      ctx.fillStyle = '#e8eef9';
+      ctx.font = '600 16px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`Speed: ${Math.round(chaserSpeed || 0)}  Score: ${score || 0}`, 16, 12);
+      ctx.fillText(`Coins: ${coins}`, 16, 34);
+      if (combo > 1) {
+        ctx.fillStyle = '#8cf2ff';
+        ctx.fillText(`Combo x${combo}`, 16, 56);
+      }
+      if (bestScore != null) {
+        ctx.fillStyle = '#a9b8d6';
+        ctx.fillText(`Best: ${bestScore}`, 16, 76);
+      }
     }
 
     // Controls hint
@@ -1221,14 +1227,16 @@
     }
 
     // Distance counter (bottom center)
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = '#e8eef9';
-    ctx.fillText(`Distance: ${distanceTraveled}`, window.innerWidth / 2, window.innerHeight - 10);
+    if (gamePhase === 'playing') {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = '#e8eef9';
+      ctx.fillText(`Distance: ${distanceTraveled}`, window.innerWidth / 2, window.innerHeight - 10);
+    }
 
-    // Slow-mo bar (top center)
-    if (slowMoTimer > 0) {
-      const w = 240, h = 8;
+          // Slow-mo bar (top center)
+      if (gamePhase === 'playing' && slowMoTimer > 0) {
+const w = 240, h = 8;
       const x = (window.innerWidth - w) / 2;
       const y = 40;
       ctx.fillStyle = '#1a2333';
@@ -1533,15 +1541,17 @@
     lastTime = now;
     update(dt);
     // Animation timers/state
-    const moving = Math.abs(player.vx) > 10;
-    if (moving) facing = Math.sign(player.vx) || facing;
-    if (player.onGround && moving) {
-      const speedFactor = clamp(Math.abs(player.vx) / stats.maxRunSpeed, 0.5, 1.6);
-      animTimer += dt * 10 * speedFactor;
-      runFrameIndex = Math.floor(animTimer) % (spriteFrames ? spriteFrames.run.length : 1);
-    } else if (player.onGround && !moving) {
-      animTimer = 0;
-      runFrameIndex = 0;
+    if (gamePhase === 'playing' && player) {
+      const moving = Math.abs(player.vx) > 10;
+      if (moving) facing = Math.sign(player.vx) || facing;
+      if (player.onGround && moving) {
+        const speedFactor = clamp(Math.abs(player.vx) / stats.maxRunSpeed, 0.5, 1.6);
+        animTimer += dt * 10 * speedFactor;
+        runFrameIndex = Math.floor(animTimer) % (spriteFrames ? spriteFrames.run.length : 1);
+      } else if (player.onGround && !moving) {
+        animTimer = 0;
+        runFrameIndex = 0;
+      }
     }
     draw();
 
@@ -1554,13 +1564,10 @@
           break;
         }
       }
-    } else {
-      mouse.clicked = false;
     }
 
     // Handle start menu clicks
     if (gamePhase === 'menu' && mouse.clicked) {
-      mouse.clicked = false;
       for (const b of menuButtons) {
         if (mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h) {
           if (b.type === 'mode') gameMode = b.key;
@@ -1569,26 +1576,27 @@
           else if (b.type === 'play') { startGameWithSettings(); }
         }
       }
+      mouse.clicked = false;
     }
 
     // Handle level complete / game over menu clicks
     if ((gamePhase === 'levelComplete' || gameOver) && levelButtons && levelButtons.length && mouse.clicked) {
-      mouse.clicked = false;
       for (const b of levelButtons) {
         if (mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h) {
           if (b.key === 'menu') {
-            gamePhase = 'menu'; gameOver = false; levelButtons = []; return requestAnimationFrame(frame);
+            gamePhase = 'menu'; gameOver = false; levelButtons = []; mouse.clicked = false; return requestAnimationFrame(frame);
           }
           if (b.key === 'replay') {
-            gameOver = false; levelButtons = []; resetWorld(); gamePhase = 'playing'; return requestAnimationFrame(frame);
+            gameOver = false; levelButtons = []; resetWorld(); gamePhase = 'playing'; mouse.clicked = false; return requestAnimationFrame(frame);
           }
           if (b.key === 'next') {
             currentLevelIndex = Math.min(currentLevelIndex + 1, levels.length - 1);
             currentLevelTarget = levels[currentLevelIndex].distance;
-            levelButtons = []; resetWorld(); gamePhase = 'playing'; return requestAnimationFrame(frame);
+            levelButtons = []; resetWorld(); gamePhase = 'playing'; mouse.clicked = false; return requestAnimationFrame(frame);
           }
         }
       }
+      mouse.clicked = false;
     }
     requestAnimationFrame(frame);
   }
