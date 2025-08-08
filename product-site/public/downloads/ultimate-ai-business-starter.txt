@@ -1,0 +1,5 @@
+Thank you for your purchase!
+
+This is the Ultimate AI Business Starter Kit placeholder file shipped with the repository.
+
+Replace this file with your real kit (ZIP/PDF) in public/downloads/ and adjust the filename in src/app/api/download/route.ts if needed.
