@@ -4,15 +4,16 @@
   // Canvas setup with DPR scaling
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  let dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  let dpr = 1;
 
   function resizeCanvas() {
-    dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    dpr = 1; // force 1x scale for performance
     canvas.width = Math.floor(window.innerWidth * dpr);
     canvas.height = Math.floor(window.innerHeight * dpr);
     canvas.style.width = window.innerWidth + 'px';
     canvas.style.height = window.innerHeight + 'px';
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
   }
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
@@ -606,7 +607,7 @@
       }
 
       // Coins on this platform (clusters)
-      if (settings.toggles.coins && Math.random() < gen.coinRate) {
+      if (settings.toggles.coins && Math.random() < gen.coinRate * 0.85) {
         const clusterCount = randInt(3, 6);
         const startOffset = randRange(30, Math.max(40, width - 140));
         const spacing = randRange(26, 34);
@@ -618,14 +619,14 @@
       }
 
       // Booster ring sometimes near end of platform
-      if (settings.toggles.boosterRings && Math.random() < gen.boosterRate) {
+      if (settings.toggles.boosterRings && Math.random() < gen.boosterRate * 0.8) {
         const rx = x + randRange(60, Math.max(80, width - 60));
         const ry = y - randRange(40, 100);
         boostRings.push({ x: rx, y: ry, r: 26, hit: false });
       }
 
       // Hazards: spikes or saws on top
-      if (settings.toggles.hazards && Math.random() < gen.hazardRate && width > 120) {
+      if (settings.toggles.hazards && Math.random() < gen.hazardRate * 0.7 && width > 120) {
         if (Math.random() < 0.6) {
           const num = randInt(2, 5);
           const start = x + randRange(10, width - 60);
@@ -639,7 +640,7 @@
       }
 
       // Slow-mo shard occasionally above platform
-      if (settings.toggles.slowMoShards && Math.random() < gen.slowRate) {
+      if (settings.toggles.slowMoShards && Math.random() < gen.slowRate * 0.8) {
         const sx = x + randRange(30, width - 30);
         const sy = y - randRange(80, 140);
         slowShards.push({ x: sx, y: sy, r: 12, taken: false, spin: Math.random() * Math.PI * 2 });
@@ -702,6 +703,9 @@
     }
 
     if (player.onGround) player.coyoteTimer = PLAYER.coyoteTime; else if (player.coyoteTimer > 0) player.coyoteTimer -= sdt;
+
+    // Early out if tab is backgrounded to avoid spikes
+    if (document.hidden) return;
 
     // Apply gravity
     const gravityMultiplier = (!player.onGround && upgrades.glide && input.up && player.vy > 0) ? 0.55 : 1.0;
@@ -985,7 +989,7 @@
 
     // Subtle parallax grid
     ctx.save();
-    ctx.globalAlpha = 0.05;
+    ctx.globalAlpha = 0.03;
     const gridSize = 96;
     const offset = -((cameraX * 0.2) % gridSize);
     ctx.strokeStyle = '#b3c0ff';
@@ -1548,7 +1552,7 @@ const w = 240, h = 8;
   // Main loop
   let lastTime = performance.now();
   function frame(now) {
-    const dt = Math.min(0.02, (now - lastTime) / 1000);
+    const dt = Math.min(0.016, (now - lastTime) / 1000);
     lastTime = now;
     update(dt);
     // Animation timers/state
