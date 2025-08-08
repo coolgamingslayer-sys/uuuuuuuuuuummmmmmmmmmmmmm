@@ -112,6 +112,7 @@ export class UpgradeSet {
 export class Player {
   constructor(x, y, upgrades) {
     this.x = x; this.y = y; this.radius = 12;
+    this.vx = 0; this.vy = 0;
     this.health = upgrades.maxHealth;
     this.upgrades = upgrades;
     this.angle = 0;
@@ -167,9 +168,41 @@ export class TopDownScene {
     const moveX = (input.isDown('a') || input.isDown('arrowleft') ? -1 : 0) + (input.isDown('d') || input.isDown('arrowright') ? 1 : 0);
     const moveY = (input.isDown('w') || input.isDown('arrowup') ? -1 : 0) + (input.isDown('s') || input.isDown('arrowdown') ? 1 : 0);
     let len = Math.hypot(moveX, moveY) || 1;
-    const speed = this.upgrades.moveSpeed;
-    this.player.x = clamp(this.player.x + (moveX/len) * speed * dt, 0, this.worldWidth);
-    this.player.y = clamp(this.player.y + (moveY/len) * speed * dt, 0, this.worldHeight);
+
+    // Inertial movement: acceleration + friction
+    const maxSpeed = this.upgrades.moveSpeed;
+    const accel = maxSpeed * 6; // reach top speed in ~0.16s
+    const friction = 5;         // per-second damping when no input
+
+    const ax = (moveX/len) * accel;
+    const ay = (moveY/len) * accel;
+
+    // Apply acceleration only if input; otherwise apply friction
+    if (moveX !== 0 || moveY !== 0) {
+      this.player.vx += ax * dt;
+      this.player.vy += ay * dt;
+    } else {
+      this.player.vx -= this.player.vx * Math.min(1, friction * dt);
+      this.player.vy -= this.player.vy * Math.min(1, friction * dt);
+    }
+
+    // Clamp speed
+    const vlen = Math.hypot(this.player.vx, this.player.vy);
+    if (vlen > maxSpeed) {
+      const scale = maxSpeed / (vlen || 1);
+      this.player.vx *= scale;
+      this.player.vy *= scale;
+    }
+
+    // Integrate position
+    this.player.x += this.player.vx * dt;
+    this.player.y += this.player.vy * dt;
+
+    // Bounds, with bounce-less clamp and velocity zero at edges
+    if (this.player.x < 0) { this.player.x = 0; if (this.player.vx < 0) this.player.vx = 0; }
+    if (this.player.y < 0) { this.player.y = 0; if (this.player.vy < 0) this.player.vy = 0; }
+    if (this.player.x > this.worldWidth) { this.player.x = this.worldWidth; if (this.player.vx > 0) this.player.vx = 0; }
+    if (this.player.y > this.worldHeight) { this.player.y = this.worldHeight; if (this.player.vy > 0) this.player.vy = 0; }
 
     // Aim towards mouse
     const dx = this.engine.input.mouse.x - this.player.x;

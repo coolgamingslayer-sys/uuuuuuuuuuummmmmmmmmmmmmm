@@ -91,13 +91,18 @@ export class GameEngine {
       const dt = Math.min(0.1, now - this.lastTime || 0);
       this.lastTime = now;
 
-      this.accumulator += dt;
-      while (this.accumulator >= this.fixedStep) {
-        this.sceneManager.update(this.fixedStep);
-        this.accumulator -= this.fixedStep;
+      try {
+        this.accumulator += dt;
+        while (this.accumulator >= this.fixedStep) {
+          this.sceneManager.update(this.fixedStep);
+          this.accumulator -= this.fixedStep;
+        }
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.sceneManager.render(this.ctx);
+      } catch (err) {
+        // Keep the loop alive; log for debugging
+        console.error('Game loop error:', err);
       }
-      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-      this.sceneManager.render(this.ctx);
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
