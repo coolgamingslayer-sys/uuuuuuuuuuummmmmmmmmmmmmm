@@ -212,24 +212,45 @@
     ArrowUp: 'up',
     KeyW: 'up',
     Space: 'up',
+    ShiftLeft: 'dash',
+    ShiftRight: 'dash',
+    KeyE: 'dash',
+    KeyU: 'upgradeMenu',
   };
   window.addEventListener('keydown', (e) => {
     const k = keyMap[e.code];
     if (k) {
-      input[k] = true;
-      if (k === 'up') input.jumpPressed = true;
-      e.preventDefault();
+      if (k === 'upgradeMenu') {
+        isUpgradeMenuOpen = !isUpgradeMenuOpen;
+        e.preventDefault();
+      } else {
+        input[k] = true;
+        if (k === 'up') input.jumpPressed = true;
+        if (k === 'dash') input.dashPressed = true;
+        e.preventDefault();
+      }
     }
     if (e.code === 'KeyR') {
       if (gameOver) restart();
     }
-    if (e.code === 'Digit1') { tryPurchase('speed'); }
-    if (e.code === 'Digit2') { tryPurchase('jump'); }
-    if (e.code === 'Digit3') { tryPurchase('double'); }
   }, { passive: false });
   window.addEventListener('keyup', (e) => {
     const k = keyMap[e.code];
-    if (k) input[k] = false;
+    if (k && k !== 'upgradeMenu') input[k] = false;
+  });
+
+  // Mouse for upgrades menu
+  let mouse = { x: 0, y: 0, down: false, clicked: false };
+  canvas.addEventListener('mousemove', (e) => {
+    mouse.x = e.offsetX;
+    mouse.y = e.offsetY;
+  });
+  canvas.addEventListener('mousedown', (e) => {
+    mouse.down = true;
+    mouse.clicked = true;
+  });
+  canvas.addEventListener('mouseup', () => {
+    mouse.down = false;
   });
 
   // Game constants
@@ -285,13 +306,70 @@
       baseCost: 15,
       apply() {
         upgrades.doubleJump = true;
+        player.remainingAirJumps = 1;
         chaserSpeedBonus += 50;
         chaserMaxBonus += 50;
       },
       canBuy() { return !upgrades.doubleJump; },
       currentCost() { return this.baseCost; },
       desc: 'Mid-air jump'
-    }
+    },
+    magnet: {
+      name: 'Coin Magnet',
+      baseCost: 10,
+      apply() { upgrades.magnetRadius += 40; },
+      canBuy() { return upgrades.magnetRadius < 200; },
+      currentCost() { return this.baseCost + Math.floor(upgrades.magnetRadius / 40) * 6; },
+      desc: 'Collect coins from afar'
+    },
+    glide: {
+      name: 'Glide',
+      baseCost: 14,
+      apply() { upgrades.glide = true; },
+      canBuy() { return !upgrades.glide; },
+      currentCost() { return this.baseCost; },
+      desc: 'Hold jump to fall slower'
+    },
+    dash: {
+      name: 'Dash',
+      baseCost: 16,
+      apply() { upgrades.dash = true; },
+      canBuy() { return !upgrades.dash; },
+      currentCost() { return this.baseCost; },
+      desc: 'Shift/E to burst forward'
+    },
+    coinValue: {
+      name: 'Gold Rush',
+      baseCost: 10,
+      apply() { upgrades.coinValue += 1; },
+      canBuy() { return upgrades.coinValue < 5; },
+      currentCost() { return this.baseCost + (upgrades.coinValue - 1) * 8; },
+      desc: 'Coins worth +1 each'
+    },
+    stamina: {
+      name: 'Stamina',
+      baseCost: 12,
+      apply() { stats.runDecel = Math.max(1200, stats.runDecel * 0.9); upgrades.staminaLevel += 1; },
+      canBuy() { return upgrades.staminaLevel < 5; },
+      currentCost() { return this.baseCost + upgrades.staminaLevel * 6; },
+      desc: '-Deceleration (keep speed)'
+    },
+    platBoost: {
+      name: 'Platform Boost',
+      baseCost: 12,
+      apply() { upgrades.platBoostLevel += 1; },
+      canBuy() { return upgrades.platBoostLevel < 3; },
+      currentCost() { return this.baseCost + upgrades.platBoostLevel * 8; },
+      desc: 'Speed burst on fresh steps'
+    },
+    secondLife: {
+      name: 'Second Life',
+      baseCost: 20,
+      apply() { upgrades.extraLives += 1; },
+      canBuy() { return upgrades.extraLives < 3; },
+      currentCost() { return this.baseCost + upgrades.extraLives * 10; },
+      desc: 'Revive when you fall'
+    },
   };
 
   // World state
@@ -307,6 +385,10 @@
   let stats = { ...PLAYER };
   let chaserSpeedBonus = 0;
   let chaserMaxBonus = 0;
+  let isUpgradeMenuOpen = false;
+  let lastUpgradeLayout = [];
+  let distanceTraveled = 0;
+  let lastSafeSnapshot = null; // { x, y, chaserX }
 
   function createPlayer(startX, startY) {
     return {
@@ -339,7 +421,6 @@
     if (coins >= cost) {
       coins -= cost;
       def.apply();
-      // Update player air jumps if double purchased
       if (key === 'double') {
         player.remainingAirJumps = 1;
       }
@@ -352,10 +433,25 @@
     coins = 0;
     coinsCollectedThisRun = 0;
     coinsArray = [];
-    upgrades = { speedLevel: 0, jumpLevel: 0, doubleJump: false };
+    upgrades = {
+      speedLevel: 0,
+      jumpLevel: 0,
+      doubleJump: false,
+      magnetRadius: 0,
+      glide: false,
+      dash: false,
+      coinValue: 1,
+      staminaLevel: 0,
+      platBoostLevel: 0,
+      extraLives: 0,
+    };
     stats = { ...PLAYER };
     chaserSpeedBonus = 0;
     chaserMaxBonus = 0;
+    isUpgradeMenuOpen = false;
+    lastUpgradeLayout = [];
+    distanceTraveled = 0;
+    lastSafeSnapshot = null;
     platforms = [];
     const groundY = Math.min(window.innerHeight - 140, 560);
     // Start with a generous runway
@@ -437,6 +533,7 @@
 
   function update(dt) {
     if (gameOver) return;
+    if (isUpgradeMenuOpen) return; // pause everything except menu
 
     timeAlive += dt;
 
@@ -461,6 +558,13 @@
     }
     player.vx = clamp(player.vx, -stats.maxRunSpeed, stats.maxRunSpeed);
 
+    // Dash
+    if (upgrades.dash && input.dashPressed) {
+      const dir = (input.right ? 1 : 0) - (input.left ? 1 : 0) || Math.sign(player.vx) || 1;
+      player.vx = clamp(player.vx + dir * 900, -stats.maxRunSpeed * 1.4, stats.maxRunSpeed * 1.4);
+      input.dashPressed = false;
+    }
+
     // Jump buffering and coyote time
     if (input.jumpPressed) {
       player.jumpBufferTimer = PLAYER.jumpBufferTime;
@@ -472,7 +576,8 @@
     if (player.onGround) player.coyoteTimer = PLAYER.coyoteTime; else if (player.coyoteTimer > 0) player.coyoteTimer -= dt;
 
     // Apply gravity
-    player.vy += GRAVITY * dt;
+    const gravityMultiplier = (!player.onGround && upgrades.glide && input.up && player.vy > 0) ? 0.55 : 1.0;
+    player.vy += GRAVITY * gravityMultiplier * dt;
 
     // Attempt jump
     if (player.jumpBufferTimer > 0 && player.coyoteTimer > 0) {
@@ -528,6 +633,13 @@
     }
     if (groundPlatform && groundPlatform.steppedAt < 0) {
       groundPlatform.steppedAt = timeAlive;
+      // Platform boost shortly after stepping
+      if (upgrades.platBoostLevel > 0 && Math.abs(player.vx) > 0) {
+        const boost = 160 * upgrades.platBoostLevel;
+        player.vx += Math.sign(player.vx) * boost;
+      }
+      // Record last safe snapshot
+      lastSafeSnapshot = { x: player.x, y: player.y, chaserX: chaserX };
     }
 
     // Camera follows ahead of player a bit
@@ -536,6 +648,7 @@
 
     // Score is max distance ahead of start relative to chaser
     score = Math.max(score, Math.floor(player.x - chaserX));
+    distanceTraveled = Math.max(distanceTraveled, Math.floor(player.x));
 
     // Coin collection
     const playerBox = { x: player.x, y: player.y, w: player.width, h: player.height };
@@ -545,8 +658,22 @@
       const cy = c.y - c.size / 2;
       if (aabbIntersect(playerBox.x, playerBox.y, playerBox.w, playerBox.h, cx, cy, c.size, c.size)) {
         c.collected = true;
-        coins += 1;
+        coins += upgrades.coinValue || 1;
         coinsCollectedThisRun += 1;
+        continue;
+      }
+      // Magnet collection
+      if (upgrades.magnetRadius && !player.onGround) {
+        const ccx = c.x;
+        const ccy = c.y;
+        const dx = (player.x + player.width / 2) - ccx;
+        const dy = (player.y + player.height / 2) - ccy;
+        const dist = Math.hypot(dx, dy);
+        if (dist < upgrades.magnetRadius) {
+          c.collected = true;
+          coins += upgrades.coinValue || 1;
+          coinsCollectedThisRun += 1;
+        }
       }
     }
 
@@ -561,8 +688,19 @@
     }
     const killY = Math.max(window.innerHeight + 600, 1400);
     if (player.y > killY) {
-      gameOver = true;
-      deathReason = 'You fell...';
+      // Try second life
+      if (upgrades.extraLives && lastSafeSnapshot) {
+        upgrades.extraLives -= 1;
+        player.x = lastSafeSnapshot.x;
+        player.y = lastSafeSnapshot.y;
+        player.vx = 0;
+        player.vy = 0;
+        player.onGround = true;
+        chaserX = Math.min(chaserX, player.x - 300);
+      } else {
+        gameOver = true;
+        deathReason = 'You fell...';
+      }
     }
   }
 
@@ -722,32 +860,100 @@
     if (timeAlive < 3 && !gameOver) {
       ctx.fillStyle = '#a9b8d6';
       ctx.textAlign = 'center';
-      ctx.fillText('Move: A/D or Arrow Keys — Jump: W/Up/Space — Keep ahead of the red wall!', window.innerWidth / 2, 14);
+      ctx.fillText('Move: A/D or Arrow Keys — Jump: W/Up/Space — U: Upgrades (pauses) — Keep ahead of the red wall!', window.innerWidth / 2, 14);
     }
 
-    // Upgrade HUD (top-right)
-    if (!gameOver) {
-      const pad = 12;
-      const x0 = window.innerWidth - 360;
-      const y0 = 10;
+    // Distance counter (bottom center)
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#e8eef9';
+    ctx.fillText(`Distance: ${distanceTraveled}`, window.innerWidth / 2, window.innerHeight - 10);
+
+    // Upgrades overlay menu
+    if (isUpgradeMenuOpen && !gameOver) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(8,10,16,0.75)';
+      ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+      const panelW = Math.min(720, window.innerWidth - 40);
+      const panelH = Math.min(460, window.innerHeight - 40);
+      const panelX = (window.innerWidth - panelW) / 2;
+      const panelY = (window.innerHeight - panelH) / 2;
+      ctx.fillStyle = '#121826';
+      ctx.strokeStyle = '#36507a';
+      ctx.lineWidth = 2;
+      ctx.fillRect(panelX, panelY, panelW, panelH);
+      ctx.strokeRect(panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1);
+      ctx.fillStyle = '#e8eef9';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
+      ctx.font = '700 20px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial';
+      ctx.fillText('Upgrades (click to buy) — press U to resume', panelX + 16, panelY + 12);
+      ctx.font = '600 14px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial';
       ctx.fillStyle = '#cfe3ff';
-      ctx.fillText('Upgrades (1/2/3):', x0, y0);
-      const items = [
-        { key: 'speed', label: '1) Speed Shoes', def: UPGRADE_DEFS.speed },
-        { key: 'jump', label: '2) High Jump', def: UPGRADE_DEFS.jump },
-        { key: 'double', label: '3) Double Jump', def: UPGRADE_DEFS.double },
+      ctx.fillText(`Coins: ${coins}`, panelX + 16, panelY + 40);
+
+      // Layout upgrade buttons in grid
+      const entries = [
+        { key: 'speed' }, { key: 'jump' }, { key: 'double' }, { key: 'magnet' },
+        { key: 'glide' }, { key: 'dash' }, { key: 'coinValue' }, { key: 'stamina' },
+        { key: 'platBoost' }, { key: 'secondLife' },
       ];
-      let yy = y0 + 18;
-      for (const it of items) {
-        const cost = it.def.currentCost();
-        const affordable = coins >= cost && it.def.canBuy();
-        ctx.fillStyle = affordable ? '#e8eef9' : '#7f8aa3';
-        const extra = it.key === 'speed' ? `Lv.${upgrades.speedLevel}` : it.key === 'jump' ? `Lv.${upgrades.jumpLevel}` : (upgrades.doubleJump ? 'Owned' : '');
-        ctx.fillText(`${it.label} — ${it.def.desc} — Cost: ${cost} ${extra ? '— ' + extra : ''}`, x0, yy);
-        yy += 18;
+      const cols = 2;
+      const rows = Math.ceil(entries.length / cols);
+      const cellW = (panelW - 32 - (cols - 1) * 16) / cols;
+      const cellH = 70;
+      let layout = [];
+      for (let i = 0; i < entries.length; i++) {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = panelX + 16 + col * (cellW + 16);
+        const y = panelY + 70 + row * (cellH + 12);
+        const w = cellW;
+        const h = cellH;
+        layout.push({ ...entries[i], x, y, w, h });
       }
+      lastUpgradeLayout = layout;
+
+      for (const item of layout) {
+        const def = UPGRADE_DEFS[item.key];
+        const cost = def.currentCost();
+        const canBuy = def.canBuy() && coins >= cost;
+        // Card
+        ctx.fillStyle = canBuy ? '#1a2333' : '#151b28';
+        ctx.strokeStyle = canBuy ? '#3e61a3' : '#2a3a56';
+        ctx.lineWidth = 2;
+        ctx.fillRect(item.x, item.y, item.w, item.h);
+        ctx.strokeRect(item.x + 0.5, item.y + 0.5, item.w - 1, item.h - 1);
+        // Text
+        ctx.fillStyle = '#e8eef9';
+        ctx.font = '700 16px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial';
+        ctx.fillText(def.name, item.x + 12, item.y + 10);
+        ctx.font = '600 13px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial';
+        ctx.fillStyle = '#b9c7df';
+        ctx.fillText(def.desc, item.x + 12, item.y + 32);
+        // Cost and state
+        ctx.textAlign = 'right';
+        ctx.fillStyle = canBuy ? '#ffd84a' : '#7f8aa3';
+        ctx.fillText(`Cost: ${cost}`, item.x + item.w - 12, item.y + 10);
+        ctx.textAlign = 'left';
+        // State details
+        let extra = '';
+        if (item.key === 'speed') extra = `Lv.${upgrades.speedLevel}`;
+        else if (item.key === 'jump') extra = `Lv.${upgrades.jumpLevel}`;
+        else if (item.key === 'double') extra = upgrades.doubleJump ? 'Owned' : '';
+        else if (item.key === 'magnet') extra = `R:${upgrades.magnetRadius||0}`;
+        else if (item.key === 'glide') extra = upgrades.glide ? 'Owned' : '';
+        else if (item.key === 'dash') extra = upgrades.dash ? 'Owned' : '';
+        else if (item.key === 'coinValue') extra = `x${upgrades.coinValue||1}`;
+        else if (item.key === 'stamina') extra = `Lv.${upgrades.staminaLevel||0}`;
+        else if (item.key === 'platBoost') extra = `Lv.${upgrades.platBoostLevel||0}`;
+        else if (item.key === 'secondLife') extra = `Lives:${upgrades.extraLives||0}`;
+        if (extra) {
+          ctx.fillStyle = '#9fb4d8';
+          ctx.fillText(extra, item.x + 12, item.y + 50);
+        }
+      }
+      ctx.restore();
     }
 
     if (gameOver) {
@@ -791,6 +997,19 @@
       runFrameIndex = 0;
     }
     draw();
+
+    // Handle upgrade menu clicks
+    if (isUpgradeMenuOpen && mouse.clicked) {
+      mouse.clicked = false;
+      for (const b of lastUpgradeLayout) {
+        if (mouse.x >= b.x && mouse.x <= b.x + b.w && mouse.y >= b.y && mouse.y <= b.y + b.h) {
+          tryPurchase(b.key);
+          break;
+        }
+      }
+    } else {
+      mouse.clicked = false;
+    }
     requestAnimationFrame(frame);
   }
 
