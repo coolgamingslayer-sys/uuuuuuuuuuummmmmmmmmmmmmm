@@ -2,6 +2,8 @@ import { GameEngine } from './engine.js';
 import { TopDownScene } from './topdown.js';
 import { PlatformerMinigame } from './minigames/platformer.js';
 import { CollectorMinigame } from './minigames/collector.js';
+import { TargetsMinigame } from './minigames/targets.js';
+import { DashMinigame } from './minigames/dash.js';
 
 const canvas = document.getElementById('game');
 const engine = new GameEngine(canvas);
@@ -15,6 +17,24 @@ function createMinigame(type, { onSuccess, onExit, timeLimit }) {
       onSuccess: () => { onSuccess?.(); engine.sceneManager.setScene(topDownScene); },
       onExit: () => { onExit?.(); engine.sceneManager.setScene(topDownScene); },
       timeLimit
+    });
+  } else if (type === 'collector') {
+    mg = new CollectorMinigame(engine, {
+      onSuccess: () => { onSuccess?.(); engine.sceneManager.setScene(topDownScene); },
+      onExit: () => { onExit?.(); engine.sceneManager.setScene(topDownScene); },
+      timeLimit
+    });
+  } else if (type === 'targets') {
+    mg = new TargetsMinigame(engine, {
+      onSuccess: () => { onSuccess?.(); engine.sceneManager.setScene(topDownScene); },
+      onExit: () => { onExit?.(); engine.sceneManager.setScene(topDownScene); },
+      timeLimit: timeLimit ?? 20
+    });
+  } else if (type === 'dash') {
+    mg = new DashMinigame(engine, {
+      onSuccess: () => { onSuccess?.(); engine.sceneManager.setScene(topDownScene); },
+      onExit: () => { onExit?.(); engine.sceneManager.setScene(topDownScene); },
+      timeLimit: timeLimit ?? 18
     });
   } else {
     mg = new CollectorMinigame(engine, {

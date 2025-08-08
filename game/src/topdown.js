@@ -36,25 +36,74 @@ class Enemy {
   render(ctx) {
     ctx.fillStyle = '#ef476f';
     ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 2; ctx.stroke();
   }
 }
 
 class Portal {
   constructor(x, y, type) {
-    this.x = x; this.y = y; this.type = type; this.radius = 16;
+    this.x = x; this.y = y; this.type = type; this.radius = 18; this.t = 0;
   }
   render(ctx) {
-    const color = this.type === 'platformer' ? '#118ab2' : '#06d6a0';
+    const colorMap = {
+      platformer: '#118ab2',
+      collector: '#06d6a0',
+      targets: '#ffd166',
+      dash: '#a78bfa'
+    };
+    const labelMap = {
+      platformer: 'Platformer',
+      collector: 'Collector',
+      targets: 'Targets',
+      dash: 'Dash'
+    };
+    const color = colorMap[this.type] || '#8ecae6';
+    this.t += 0.016;
+    const pulse = this.radius + Math.sin(this.t * 3) * 2;
+
+    // Outer ring
+    ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(this.x, this.y, pulse, 0, Math.PI*2); ctx.stroke();
+
+    // Rotating arcs
+    ctx.lineWidth = 3;
+    const segments = 3;
+    for (let i = 0; i < segments; i++) {
+      const a0 = this.t * 1.5 + (i * Math.PI * 2) / segments;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, pulse + 6, a0, a0 + Math.PI / 4);
+      ctx.stroke();
+    }
+
+    // Label
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#e6e8ef';
+    ctx.fillText(labelMap[this.type] || this.type, this.x, this.y + pulse + 18);
+    ctx.restore();
+  }
+}
+
+class Particle {
+  constructor(x, y, vx, vy, life, color) {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.life = life; this.color = color;
+    this.maxLife = life;
+  }
+  update(dt) { this.x += this.vx * dt; this.y += this.vy * dt; this.vy += 20 * dt; this.life -= dt; }
+  render(ctx) {
+    const a = Math.max(0, this.life / this.maxLife);
+    ctx.fillStyle = `${this.color}${Math.floor(a * 255).toString(16).padStart(2,'0')}`;
+    ctx.beginPath(); ctx.arc(this.x, this.y, 2 + 2*a, 0, Math.PI*2); ctx.fill();
   }
 }
 
 export class UpgradeSet {
   constructor() {
-    this.moveSpeed = 140;
-    this.fireCooldown = 0.25;
+    this.moveSpeed = 160;
+    this.fireCooldown = 0.22;
     this.bulletDamage = 1;
     this.maxHealth = 6;
   }
@@ -84,13 +133,16 @@ export class TopDownScene {
 
     this.enemies = [];
     this.bullets = [];
+    this.particles = [];
     this.spawnTimer = 0;
     this.score = 0;
 
-    const margin = 80;
+    const margin = 90;
     this.portals = [
       new Portal(margin, margin, 'platformer'),
-      new Portal(this.worldWidth - margin, margin, 'collector')
+      new Portal(this.worldWidth - margin, margin, 'collector'),
+      new Portal(margin, this.worldHeight - margin, 'targets'),
+      new Portal(this.worldWidth - margin, this.worldHeight - margin, 'dash'),
     ];
   }
 
@@ -130,7 +182,7 @@ export class TopDownScene {
     if (shooting && this.player.cooldown <= 0) {
       const dirX = Math.cos(this.player.angle);
       const dirY = Math.sin(this.player.angle);
-      this.bullets.push(new Bullet(this.player.x + dirX * 16, this.player.y + dirY * 16, dirX, dirY, 420, this.upgrades.bulletDamage));
+      this.bullets.push(new Bullet(this.player.x + dirX * 16, this.player.y + dirY * 16, dirX, dirY, 440, this.upgrades.bulletDamage));
       this.player.cooldown = this.upgrades.fireCooldown;
     }
 
@@ -149,6 +201,7 @@ export class TopDownScene {
 
     for (const e of this.enemies) e.update(dt, this.player);
     for (const b of this.bullets) b.update(dt);
+    for (const p of this.particles) p.update(dt);
 
     // Collisions: bullets vs enemies
     for (const e of this.enemies) {
@@ -159,10 +212,18 @@ export class TopDownScene {
         }
       }
     }
-    this.enemies = this.enemies.filter(e => {
-      if (e.health <= 0) { this.score += 1; return false; }
-      return true;
-    });
+    const survivors = [];
+    for (const e of this.enemies) {
+      if (e.health <= 0) {
+        this.score += 1;
+        for (let i = 0; i < 10; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const s = 60 + Math.random() * 120;
+          this.particles.push(new Particle(e.x, e.y, Math.cos(a)*s, Math.sin(a)*s, 0.6, '#ef476f'));
+        }
+      } else survivors.push(e);
+    }
+    this.enemies = survivors;
 
     // Collisions: enemies vs player
     for (const e of this.enemies) {
@@ -171,13 +232,13 @@ export class TopDownScene {
       }
     }
 
-    // Remove dead bullets
+    // Clean up
     this.bullets = this.bullets.filter(b => b.life > 0 && b.x>-32 && b.y>-32 && b.x<this.worldWidth+32 && b.y<this.worldHeight+32);
+    this.particles = this.particles.filter(p => p.life > 0);
 
     // Portals interaction
     for (const p of this.portals) {
       if (Math.hypot(p.x - this.player.x, p.y - this.player.y) < p.radius + this.player.radius) {
-        // Enter portal
         const minigame = this.createMinigame(p.type, {
           onSuccess: () => { this.applyRandomUpgrade(); this.returnFromMinigame(); },
           onExit: () => { this.returnFromMinigame(); },
@@ -194,6 +255,7 @@ export class TopDownScene {
       this.player = new Player(this.worldWidth/2, this.worldHeight/2, this.upgrades);
       this.enemies = [];
       this.bullets = [];
+      this.particles = [];
       this.score = 0;
     }
 
@@ -213,7 +275,6 @@ export class TopDownScene {
   }
 
   returnFromMinigame() {
-    // Restore HUD after mini-game; nothing else needed as state persists in this instance
     renderHud([
       `HP: ${this.player.health.toFixed(0)} / ${this.upgrades.maxHealth}`,
       `Score: ${this.score}`,
@@ -222,9 +283,21 @@ export class TopDownScene {
   }
 
   render(ctx) {
-    // Background
-    ctx.fillStyle = '#0f1220';
-    ctx.fillRect(0,0,ctx.canvas.width, ctx.canvas.height);
+    // Background gradient + grid
+    const g = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
+    g.addColorStop(0,'#0d1224'); g.addColorStop(1,'#0b0e18');
+    ctx.fillStyle = g; ctx.fillRect(0,0,ctx.canvas.width, ctx.canvas.height);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    const grid = 48;
+    for (let x = (ctx.canvas.width%grid); x < ctx.canvas.width; x += grid) {
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x, ctx.canvas.height); ctx.stroke();
+    }
+    for (let y = (ctx.canvas.height%grid); y < ctx.canvas.height; y += grid) {
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(ctx.canvas.width, y); ctx.stroke();
+    }
+    ctx.restore();
 
     // Portals
     for (const p of this.portals) p.render(ctx);
@@ -239,6 +312,8 @@ export class TopDownScene {
     ctx.lineTo(-12, -10);
     ctx.lineTo(-12, 10);
     ctx.closePath();
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 8;
     ctx.fill();
     ctx.restore();
 
@@ -247,6 +322,9 @@ export class TopDownScene {
 
     // Enemies
     for (const e of this.enemies) e.render(ctx);
+
+    // Particles
+    for (const p of this.particles) p.render(ctx);
 
     // Upgrade popup
     if (this.lastUpgradeText) {
