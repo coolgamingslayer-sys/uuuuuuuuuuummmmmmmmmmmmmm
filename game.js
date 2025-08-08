@@ -22,6 +22,169 @@
   const randRange = (min, max) => Math.random() * (max - min) + min;
   const randInt = (min, max) => Math.floor(randRange(min, max + 1));
 
+  // Pixel-art sprite generation (16x16) for a running character
+  function createPixelManFrames() {
+    const SIZE = 16;
+
+    function makeCanvas() {
+      const c = document.createElement('canvas');
+      c.width = SIZE;
+      c.height = SIZE;
+      return c;
+    }
+
+    function clear(ctx) {
+      ctx.clearRect(0, 0, SIZE, SIZE);
+    }
+
+    function drawIdle(ctx) {
+      clear(ctx);
+      const skin = '#ffd7b8';
+      const shirt = '#3fa1ff';
+      const pants = '#2b3b52';
+      const shoe = '#1a2330';
+      const outline = '#0b0f16';
+
+      // Head (4x4)
+      ctx.fillStyle = outline; ctx.fillRect(5, 0, 6, 1);
+      ctx.fillRect(4, 1, 1, 3); ctx.fillRect(11, 1, 1, 3);
+      ctx.fillRect(5, 4, 6, 1);
+      ctx.fillStyle = skin; ctx.fillRect(5, 1, 6, 3);
+
+      // Torso
+      ctx.fillStyle = outline; ctx.fillRect(4, 5, 8, 1);
+      ctx.fillRect(3, 6, 1, 5); ctx.fillRect(12, 6, 1, 5);
+      ctx.fillRect(4, 11, 8, 1);
+      ctx.fillStyle = shirt; ctx.fillRect(4, 6, 8, 5);
+
+      // Arms hanging
+      ctx.fillStyle = outline; ctx.fillRect(2, 6, 1, 4); ctx.fillRect(13, 6, 1, 4);
+      ctx.fillStyle = shirt; ctx.fillRect(3, 7, 1, 3); ctx.fillRect(12, 7, 1, 3);
+
+      // Legs
+      ctx.fillStyle = outline; ctx.fillRect(5, 12, 2, 1); ctx.fillRect(9, 12, 2, 1);
+      ctx.fillRect(5, 13, 1, 3); ctx.fillRect(10, 13, 1, 3);
+      ctx.fillStyle = pants; ctx.fillRect(6, 12, 1, 3); ctx.fillRect(9, 12, 1, 3);
+
+      // Shoes
+      ctx.fillStyle = shoe; ctx.fillRect(4, 15, 3, 1); ctx.fillRect(9, 15, 3, 1);
+    }
+
+    function drawJump(ctx) {
+      clear(ctx);
+      const skin = '#ffd7b8';
+      const shirt = '#3fa1ff';
+      const pants = '#2b3b52';
+      const shoe = '#1a2330';
+      const outline = '#0b0f16';
+
+      // Head
+      ctx.fillStyle = outline; ctx.fillRect(5, 0, 6, 1);
+      ctx.fillRect(4, 1, 1, 3); ctx.fillRect(11, 1, 1, 3);
+      ctx.fillRect(5, 4, 6, 1);
+      ctx.fillStyle = skin; ctx.fillRect(5, 1, 6, 3);
+
+      // Torso leaned slightly
+      ctx.fillStyle = outline; ctx.fillRect(4, 5, 8, 1);
+      ctx.fillRect(3, 6, 1, 5); ctx.fillRect(12, 5, 1, 6);
+      ctx.fillRect(4, 11, 8, 1);
+      ctx.fillStyle = shirt; ctx.fillRect(4, 6, 8, 5);
+
+      // Arms forward/back
+      ctx.fillStyle = outline; ctx.fillRect(2, 6, 1, 3); ctx.fillRect(13, 7, 1, 3);
+      ctx.fillStyle = shirt; ctx.fillRect(3, 7, 1, 2); ctx.fillRect(12, 8, 1, 2);
+
+      // Legs tucked
+      ctx.fillStyle = outline; ctx.fillRect(5, 12, 2, 1); ctx.fillRect(9, 12, 2, 1);
+      ctx.fillRect(6, 11, 1, 2); ctx.fillRect(9, 11, 1, 2);
+      ctx.fillStyle = pants; ctx.fillRect(6, 12, 1, 2); ctx.fillRect(9, 12, 1, 2);
+      ctx.fillStyle = shoe; ctx.fillRect(4, 14, 3, 1); ctx.fillRect(9, 14, 3, 1);
+    }
+
+    function drawRun(ctx, phase) {
+      clear(ctx);
+      const skin = '#ffd7b8';
+      const shirt = '#3fa1ff';
+      const pants = '#2b3b52';
+      const shoe = '#1a2330';
+      const outline = '#0b0f16';
+
+      // Head
+      ctx.fillStyle = outline; ctx.fillRect(5, 0, 6, 1);
+      ctx.fillRect(4, 1, 1, 3); ctx.fillRect(11, 1, 1, 3);
+      ctx.fillRect(5, 4, 6, 1);
+      ctx.fillStyle = skin; ctx.fillRect(5, 1, 6, 3);
+
+      // Torso
+      ctx.fillStyle = outline; ctx.fillRect(4, 5, 8, 1);
+      ctx.fillRect(3, 6, 1, 5); ctx.fillRect(12, 6, 1, 5);
+      ctx.fillRect(4, 11, 8, 1);
+      ctx.fillStyle = shirt; ctx.fillRect(4, 6, 8, 5);
+
+      // Arms swing (simple alternating)
+      if (phase % 2 === 0) {
+        ctx.fillStyle = outline; ctx.fillRect(2, 6, 1, 4); ctx.fillRect(13, 7, 1, 4);
+        ctx.fillStyle = shirt; ctx.fillRect(3, 7, 1, 3); ctx.fillRect(12, 8, 1, 3);
+      } else {
+        ctx.fillStyle = outline; ctx.fillRect(2, 7, 1, 4); ctx.fillRect(13, 6, 1, 4);
+        ctx.fillStyle = shirt; ctx.fillRect(3, 8, 1, 3); ctx.fillRect(12, 7, 1, 3);
+      }
+
+      // Legs run cycle (6 phases)
+      // Define offsets for a crude run cycle
+      const patterns = [
+        // phase 0: left forward, right back
+        { lf: { x: 4, y: 12 }, lb: { x: 5, y: 13 }, rf: { x: 10, y: 13 }, rb: { x: 11, y: 12 } },
+        // 1: crossover
+        { lf: { x: 5, y: 12 }, lb: { x: 6, y: 13 }, rf: { x: 9, y: 13 }, rb: { x: 10, y: 12 } },
+        // 2: feet under body
+        { lf: { x: 6, y: 12 }, lb: { x: 6, y: 13 }, rf: { x: 9, y: 12 }, rb: { x: 9, y: 13 } },
+        // 3: right forward, left back
+        { lf: { x: 10, y: 13 }, lb: { x: 11, y: 12 }, rf: { x: 4, y: 12 }, rb: { x: 5, y: 13 } },
+        // 4: crossover
+        { lf: { x: 9, y: 13 }, lb: { x: 10, y: 12 }, rf: { x: 5, y: 12 }, rb: { x: 6, y: 13 } },
+        // 5: feet under body
+        { lf: { x: 9, y: 12 }, lb: { x: 9, y: 13 }, rf: { x: 6, y: 12 }, rb: { x: 6, y: 13 } },
+      ];
+      const pat = patterns[phase % patterns.length];
+
+      // Draw legs with outlines
+      ctx.fillStyle = outline;
+      ctx.fillRect(pat.lf.x, pat.lf.y, 2, 1); // left foot leading
+      ctx.fillRect(pat.lb.x, pat.lb.y, 1, 3); // left back segment
+      ctx.fillRect(pat.rf.x, pat.rf.y, 1, 3); // right front segment
+      ctx.fillRect(pat.rb.x, pat.rb.y, 2, 1); // right foot trailing
+
+      ctx.fillStyle = pants;
+      ctx.fillRect(pat.lf.x + 1, pat.lf.y, 1, 2);
+      ctx.fillRect(pat.lb.x, pat.lb.y, 1, 2);
+      ctx.fillRect(pat.rf.x, pat.rf.y, 1, 2);
+      ctx.fillRect(pat.rb.x, pat.rb.y, 1, 2);
+
+      ctx.fillStyle = shoe;
+      ctx.fillRect(pat.lf.x - 1, pat.lf.y + 1, 3, 1);
+      ctx.fillRect(pat.rb.x - 1, pat.rb.y + 1, 3, 1);
+    }
+
+    // Build frames
+    const idleCanvas = makeCanvas(); drawIdle(idleCanvas.getContext('2d'));
+    const jumpCanvas = makeCanvas(); drawJump(jumpCanvas.getContext('2d'));
+
+    const runFrames = [];
+    for (let i = 0; i < 6; i++) {
+      const c = makeCanvas();
+      drawRun(c.getContext('2d'), i);
+      runFrames.push(c);
+    }
+
+    return {
+      size: SIZE,
+      idle: [idleCanvas],
+      jump: [jumpCanvas],
+      run: runFrames,
+    };
+  }
+
   // Input handling
   const input = {
     left: false,
@@ -75,6 +238,10 @@
 
   // World state
   let player, platforms, cameraX, chaserX, chaserSpeed, score, bestScore, timeAlive, gameOver, deathReason;
+  let spriteFrames = null;
+  let facing = 1; // 1 = right, -1 = left
+  let animTimer = 0;
+  let runFrameIndex = 0;
 
   function createPlayer(startX, startY) {
     return {
@@ -99,6 +266,7 @@
   }
 
   function resetWorld() {
+    if (!spriteFrames) spriteFrames = createPixelManFrames();
     platforms = [];
     const groundY = Math.min(window.innerHeight - 140, 560);
     // Start with a generous runway
@@ -327,17 +495,38 @@
     ctx.stroke();
     ctx.restore();
 
-    // Draw player
+    // Draw player (pixel-art sprite)
     const px = Math.floor(player.x - cameraX);
     const py = Math.floor(player.y);
+
+    // Select frame based on state
+    let frameCanvas;
+    const isAir = !player.onGround;
+    const isMoving = Math.abs(player.vx) > 10;
+    if (isAir) {
+      frameCanvas = spriteFrames.jump[0];
+    } else if (isMoving) {
+      frameCanvas = spriteFrames.run[runFrameIndex % spriteFrames.run.length];
+    } else {
+      frameCanvas = spriteFrames.idle[0];
+    }
+
     ctx.save();
     ctx.translate(px + player.width / 2, py + player.height / 2);
-    const tilt = clamp(player.vx / PLAYER.maxRunSpeed, -1, 1) * 0.25;
+    const tilt = clamp(player.vx / PLAYER.maxRunSpeed, -1, 1) * 0.15;
     ctx.rotate(tilt);
-    ctx.fillStyle = '#9bd7ff';
-    ctx.fillRect(-player.width / 2, -player.height / 2, player.width, player.height);
-    ctx.fillStyle = '#1b2433';
-    ctx.fillRect(-player.width / 2, -player.height / 2, player.width, 12);
+    if (facing < 0) ctx.scale(-1, 1);
+    ctx.imageSmoothingEnabled = false;
+    const fw = spriteFrames.size;
+    const fh = spriteFrames.size;
+    ctx.drawImage(
+      frameCanvas,
+      0, 0, fw, fh,
+      -player.width / 2,
+      -player.height / 2,
+      player.width,
+      player.height
+    );
     ctx.restore();
 
     // UI
@@ -387,6 +576,17 @@
     const dt = Math.min(0.033, (now - lastTime) / 1000);
     lastTime = now;
     update(dt);
+    // Animation timers/state
+    const moving = Math.abs(player.vx) > 10;
+    if (moving) facing = Math.sign(player.vx) || facing;
+    if (player.onGround && moving) {
+      const speedFactor = clamp(Math.abs(player.vx) / PLAYER.maxRunSpeed, 0.5, 1.6);
+      animTimer += dt * 10 * speedFactor;
+      runFrameIndex = Math.floor(animTimer) % (spriteFrames ? spriteFrames.run.length : 1);
+    } else if (player.onGround && !moving) {
+      animTimer = 0;
+      runFrameIndex = 0;
+    }
     draw();
     requestAnimationFrame(frame);
   }
