@@ -4,16 +4,15 @@
   // Canvas setup with DPR scaling
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  let dpr = 1;
+  let dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
 
   function resizeCanvas() {
-    dpr = 1; // force 1x scale for performance
+    dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     canvas.width = Math.floor(window.innerWidth * dpr);
     canvas.height = Math.floor(window.innerHeight * dpr);
     canvas.style.width = window.innerWidth + 'px';
     canvas.style.height = window.innerHeight + 'px';
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.imageSmoothingEnabled = false;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
@@ -666,7 +665,7 @@
   }
 
   function removeBehindPlatforms(minWorldX) {
-    if (platforms.length < 16) return; // cheap guard
+    if (platforms.length < 64) return; // cheap guard
     platforms = platforms.filter(p => p.x + p.width > minWorldX);
     coinsArray = coinsArray.filter(c => c.x + 32 > minWorldX && !c.collected);
     hazards = hazards.filter(h => (h.x || 0) + (h.w || h.r || 0) > minWorldX);
@@ -722,7 +721,7 @@
     if (player.onGround) player.coyoteTimer = PLAYER.coyoteTime; else if (player.coyoteTimer > 0) player.coyoteTimer -= sdt;
 
     // Early out if tab is backgrounded to avoid spikes
-    if (document.hidden) return;
+
 
     // Apply gravity
     const gravityMultiplier = (!player.onGround && upgrades.glide && input.up && player.vy > 0) ? 0.55 : 1.0;
@@ -923,7 +922,7 @@
     }
 
     // Generate new platforms ahead and prune behind
-    ensureAheadPlatforms(cameraX + window.innerWidth * 1.6);
+    ensureAheadPlatforms(cameraX + window.innerWidth * 2.5);
     removeBehindPlatforms(chaserX - 400);
 
     // Death conditions
@@ -1009,27 +1008,25 @@
     ctx.fillRect(0, 0, w, h);
 
     // Subtle parallax grid
-    if (settings.graphics !== 'low') {
-      ctx.save();
-      ctx.globalAlpha = 0.03;
-      const gridSize = 96;
-      const offset = -((cameraX * 0.2) % gridSize);
-      ctx.strokeStyle = '#b3c0ff';
-      ctx.lineWidth = 1;
-      for (let x = offset; x < w; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
-        ctx.stroke();
-      }
-      for (let y = 0; y < h; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-      }
-      ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = 0.03;
+    const gridSize = 96;
+    const offset = -((cameraX * 0.2) % gridSize);
+    ctx.strokeStyle = '#b3c0ff';
+    ctx.lineWidth = 1;
+    for (let x = offset; x < w; x += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
     }
+    for (let y = 0; y < h; y += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   function draw() {
@@ -1256,15 +1253,15 @@
       ctx.restore();
     }
 
-    // Particles
-    if (settings.graphics !== 'low') for (const p of particles) {
-      const sx = Math.floor(p.x - cameraX);
-      const sy = Math.floor(p.y);
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 2));
-      ctx.fillRect(sx, sy, 2, 2);
-      ctx.globalAlpha = 1;
-    }
+          // Particles
+      for (const p of particles) {
+        const sx = Math.floor(p.x - cameraX);
+        const sy = Math.floor(p.y);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 2));
+        ctx.fillRect(sx, sy, 2, 2);
+        ctx.globalAlpha = 1;
+      }
 
     // UI
     if (gamePhase === 'playing') {
@@ -1622,7 +1619,7 @@ const w = 240, h = 8;
   // Main loop
   let lastTime = performance.now();
   function frame(now) {
-    const dt = Math.min(0.016, (now - lastTime) / 1000);
+    const dt = Math.min(0.033, (now - lastTime) / 1000);
     lastTime = now;
     update(dt);
     // Animation timers/state
