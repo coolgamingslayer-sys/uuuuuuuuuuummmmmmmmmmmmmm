@@ -39,3 +39,4 @@
 {"level":"error","event":0,"ip":"198.41.200.43","connIndex":0,"error":"context canceled","time":"2025-08-09T12:03:38Z","message":"Failed to serve tunnel connection"}
 {"level":"info","event":0,"ip":"198.41.200.43","connIndex":0,"time":"2025-08-09T12:03:38Z","message":"Retrying connection in up to 32s"}
 {"level":"error","error":"context canceled","connIndex":0,"time":"2025-08-09T12:04:08Z","message":"Connection terminated"}
+{"level":"info","time":"2025-08-09T12:07:18Z","message":"Initiating graceful shutdown due to signal terminated ..."}
